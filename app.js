@@ -552,17 +552,32 @@
   =========================================================
   */
 
+  // CloudBase 上海 HTTP 网关
+  // AI 请求不再经过 Vercel /api/deepseek
+  const AI_API_URL =
+    'https://calcdaily-d5g2titwue91551fb-1482769901.ap-shanghai.app.tcloudbase.com/api/deepseek';
+
   async function apiCall(action, payload = {}) {
-    const response = await fetch('/api/deepseek', {
+    const response = await fetch(AI_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, ...payload })
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        action,
+        ...payload
+      })
     });
 
-    const data = await response.json().catch(() => ({}));
+    const data = await response
+      .json()
+      .catch(() => ({}));
 
     if (!response.ok) {
-      throw new Error(data.error || `AI 请求失败 (${response.status})`);
+      throw new Error(
+        data.error ||
+        `AI 请求失败 (${response.status})`
+      );
     }
 
     return data;
@@ -570,8 +585,15 @@
 
   async function checkApiHealth() {
     try {
-      const res = await fetch('/api/deepseek?health=1', { cache: 'no-store' });
+      const res = await fetch(
+        `${AI_API_URL}?health=1`,
+        {
+          cache: 'no-store'
+        }
+      );
+
       apiHealthy = res.ok;
+
     } catch {
       apiHealthy = false;
     }
@@ -580,15 +602,45 @@
   }
 
   function shortApiError(error) {
-    const raw = String(error?.message || error || '请求失败').trim();
+    const raw = String(
+      error?.message ||
+      error ||
+      '请求失败'
+    ).trim();
 
-    if (/402|余额|balance|insufficient/i.test(raw)) return '余额不足';
-    if (/401|api.?key|unauthor/i.test(raw)) return 'API Key 无效';
-    if (/429|rate|频率|too many/i.test(raw)) return '请求过于频繁';
-    if (/503|overload|繁忙|unavailable/i.test(raw)) return '服务暂时繁忙';
-    if (/timeout|timed out|超时/i.test(raw)) return '请求超时';
+    if (
+      /402|余额|balance|insufficient/i.test(raw)
+    ) {
+      return '余额不足';
+    }
 
-    return raw.length > 28 ? `${raw.slice(0, 28)}…` : raw;
+    if (
+      /401|api.?key|unauthor/i.test(raw)
+    ) {
+      return 'API Key 无效';
+    }
+
+    if (
+      /429|rate|频率|too many/i.test(raw)
+    ) {
+      return '请求过于频繁';
+    }
+
+    if (
+      /503|overload|繁忙|unavailable/i.test(raw)
+    ) {
+      return '服务暂时繁忙';
+    }
+
+    if (
+      /timeout|timed out|超时/i.test(raw)
+    ) {
+      return '请求超时';
+    }
+
+    return raw.length > 28
+      ? `${raw.slice(0, 28)}…`
+      : raw;
   }
 
   function markApiRequestSuccess() {
@@ -601,28 +653,47 @@
     apiLastError = shortApiError(error);
     renderApiStatus();
 
-    // 一次模型请求失败不等于整个 API 断线。
-    // 后台重新检查 /api/deepseek 是否仍可访问，避免误报“未连接”。
+    // 单次模型请求失败不代表整个 API 离线。
+    // 后台重新检查 CloudBase DeepSeek 服务。
     checkApiHealth().catch(() => {});
   }
 
   function renderApiStatus() {
     const text = $('apiStatusText');
     const dot = $('apiStatusDot');
+
     if (!text || !dot) return;
 
-    if (apiHealthy === true && apiLastError) {
-      text.textContent = `已连接 · 最近请求失败：${apiLastError}`;
-      dot.className = 'h-2 w-2 rounded-full bg-amber-400';
+    if (
+      apiHealthy === true &&
+      apiLastError
+    ) {
+      text.textContent =
+        `已连接 · 最近请求失败：${apiLastError}`;
+
+      dot.className =
+        'h-2 w-2 rounded-full bg-amber-400';
+
     } else if (apiHealthy === true) {
-      text.textContent = 'DeepSeek 已连接';
-      dot.className = 'h-2 w-2 rounded-full bg-emerald-500';
+      text.textContent =
+        'DeepSeek 已连接';
+
+      dot.className =
+        'h-2 w-2 rounded-full bg-emerald-500';
+
     } else if (apiHealthy === false) {
-      text.textContent = '服务端未连接，使用本地备用题';
-      dot.className = 'h-2 w-2 rounded-full bg-amber-400';
+      text.textContent =
+        'AI 服务未连接，使用本地备用题';
+
+      dot.className =
+        'h-2 w-2 rounded-full bg-amber-400';
+
     } else {
-      text.textContent = '检测中';
-      dot.className = 'h-2 w-2 rounded-full bg-amber-400';
+      text.textContent =
+        '检测中';
+
+      dot.className =
+        'h-2 w-2 rounded-full bg-amber-400';
     }
   }
 
