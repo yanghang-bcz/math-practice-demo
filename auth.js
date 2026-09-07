@@ -2,6 +2,12 @@
   'use strict';
 
   let authMode = 'login';
+  let registrationInfo = null;
+  let codeBusy = false;
+  let resendAfter = 0;
+  let codeTimer = null;
+  let sessionGeneration = 0;
+
   let currentSessionUserId = null;
   let authBusy = false;
   let nicknameBusy = false;
@@ -11,12 +17,12 @@
   const $ = id => document.getElementById(id);
 
   function client() {
-    return window.CalcDailySupabase?.client || null;
+    return window.CalcDailyCloudBase?.client || null;
   }
 
   function configured() {
     return Boolean(
-      window.CalcDailySupabase?.configured &&
+      window.CalcDailyCloudBase?.configured &&
       client()
     );
   }
@@ -107,6 +113,7 @@
   }
 
   function setMode(mode) {
+    if (authBusy || codeBusy) return;
     authMode = mode === 'register'
       ? 'register'
       : 'login';
@@ -166,7 +173,44 @@
       }
     }
 
+    show($('authCodeField'), authMode === 'register');
+    if ($('authCodeInput')) {
+      $('authCodeInput').required = authMode === 'register';
+      $('authCodeInput').disabled = authMode !== 'register';
+    }
     setMessage('');
+  }
+
+  function refreshCodeButton() {
+    const button = $('authSendCodeBtn');
+    if (!button) return;
+    const remaining = Math.max(0, Math.ceil((resendAfter - Date.now()) / 1000));
+    button.disabled = codeBusy || authBusy || remaining > 0 || !configured();
+    button.textContent = codeBusy ? '发送中…' : remaining ? `${remaining} 秒后重发` : '发送邮箱验证码';
+    if (!remaining && codeTimer) { clearInterval(codeTimer); codeTimer = null; }
+  }
+
+  async function sendRegistrationCode() {
+    if (!configured() || codeBusy || authBusy || Date.now() < resendAfter) return;
+    const emailInput = $('authEmailInput');
+    if (!emailInput?.reportValidity()) return;
+    const email = emailInput.value.trim();
+    codeBusy = true;
+    registrationInfo = null;
+    refreshCodeButton();
+    try {
+      const info = await client().auth.sendRegistrationCode(email);
+      if (email !== emailInput.value.trim()) throw new Error('邮箱已更改，请为当前邮箱重新发送验证码。');
+      registrationInfo = info;
+      resendAfter = Date.now() + 60000;
+      codeTimer = setInterval(refreshCodeButton, 1000);
+      setMessage('验证码已发送，请填写验证码和密码，再点击创建账号。', 'success');
+    } catch (error) {
+      setMessage(error.message || '验证码发送失败，请稍后重试。', 'error');
+    } finally {
+      codeBusy = false;
+      refreshCodeButton();
+    }
   }
 
   function currentUser() {
@@ -218,7 +262,7 @@
 
     if (!isConfigured) {
       if (title) title.textContent = '云同步未配置';
-      if (text) text.textContent = '填写 Supabase 项目配置后启用';
+      if (text) text.textContent = '填写 CloudBase 项目配置后启用';
       if (dot) dot.className =
         'h-2 w-2 shrink-0 rounded-full bg-amber-400';
       if (action) action.textContent = '配置';
@@ -306,6 +350,8 @@
 
   async function handleSession(session, eventName = '') {
     const user = session?.user || null;
+    if ((user?.id || null) !== currentSessionUserId) sessionGeneration++;
+    const generation = sessionGeneration;
 
     if (!user) {
       currentSessionUserId = null;
@@ -326,15 +372,7 @@
     renderAccountUI();
 
     // TOKEN_REFRESHED / USER_UPDATED 不重复执行整套迁移。
-    if (
-      sameUser &&
-      [
-        'INITIAL_SESSION',
-        'BOOTSTRAP',
-        'TOKEN_REFRESHED',
-        'USER_UPDATED'
-      ].includes(eventName)
-    ) {
+    if (sameUser) {
       return;
     }
 
@@ -348,6 +386,7 @@
           localState()
         );
 
+      if (generation !== sessionGeneration) return;
       await pushCloudStateToApp(merged);
 
       syncStatus = 'synced';
@@ -355,6 +394,7 @@
       renderAccountUI();
 
     } catch (error) {
+      if (generation !== sessionGeneration) return;
       console.warn('登录后的云端同步失败', error);
       syncStatus = 'error';
       syncMessage =
@@ -366,7 +406,7 @@
   async function submitAuthForm(event) {
     event.preventDefault();
 
-    if (!configured() || authBusy) return;
+    if (!configured() || authBusy || codeBusy) return;
 
     const email = String(
       $('authEmailInput')?.value || ''
@@ -401,7 +441,13 @@
       return;
     }
 
+    if (authMode === 'register' &&
+        (!registrationInfo || registrationInfo.email !== email || !$('authCodeInput')?.value.trim())) {
+      setMessage('请先为当前邮箱发送验证码，再填写验证码。', 'error');
+      return;
+    }
     authBusy = true;
+    refreshCodeButton();
 
     const submit = $('authSubmitBtn');
 
@@ -429,32 +475,15 @@
         );
 
       } else {
-        const { data, error } =
-          await client().auth.signUp({
-            email,
-            password,
-            options: {
-              emailRedirectTo:
-                `${window.location.origin}/`,
-              data: {
-                display_name: nickname
-              }
-            }
-          });
-
+        const { data, error } = await client().auth.completeRegistration(
+          registrationInfo, $('authCodeInput').value.trim(), password, nickname
+        );
         if (error) throw error;
-
-        if (data.session) {
-          setMessage(
-            '注册成功，正在同步当前学习记录。',
-            'success'
-          );
-        } else {
-          setMessage(
-            '账号已创建。请按邮箱中的确认链接完成验证，然后回来登录。',
-            'success'
-          );
-        }
+        registrationInfo = null;
+        $('authCodeInput').value = '';
+        if (!data?.session) throw new Error('账号已创建，请切换到登录。');
+        await handleSession(data.session, 'SIGNED_IN');
+        setMessage('账号已创建并登录；学习记录同步状态请查看账号面板。', 'success');
       }
 
     } catch (error) {
@@ -465,6 +494,8 @@
 
     } finally {
       authBusy = false;
+      refreshCodeButton();
+      if (currentUser()) $('authPasswordInput').value = '';
 
       if (submit) {
         submit.disabled = false;
@@ -616,7 +647,8 @@
   }
 
   async function logout() {
-    if (!configured()) return;
+    if (!configured() || authBusy) return;
+    try {
 
     const { error } =
       await client().auth.signOut();
@@ -629,10 +661,19 @@
       return;
     }
 
+    await handleSession(null, 'SIGNED_OUT');
     closeModal();
+    } catch (error) {
+      setProfileMessage(error.message || '退出登录失败。', 'error');
+    }
   }
 
   function bindEvents() {
+    $('authSendCodeBtn')?.addEventListener('click', sendRegistrationCode);
+    $('authEmailInput')?.addEventListener('input', () => {
+      registrationInfo = null;
+      if ($('authCodeInput')) $('authCodeInput').value = '';
+    });
     $('accountActionBtn')?.addEventListener(
       'click',
       openModal
@@ -722,6 +763,8 @@
     bindEvents();
     setMode('login');
     renderAccountUI();
+    refreshCodeButton();
+    window.CalcDailyAuth = { openModal, closeModal };
 
     if (!configured()) {
       return;
@@ -752,7 +795,7 @@
     } = await client().auth.getSession();
 
     if (error) {
-      console.warn('读取 Supabase Session 失败', error);
+      console.warn('读取 CloudBase Session 失败', error);
       return;
     }
 
@@ -765,9 +808,10 @@
   if (document.readyState === 'loading') {
     document.addEventListener(
       'DOMContentLoaded',
-      initAuth
+      () => initAuth().catch(error => setMessage(error.message || '账号初始化失败。', 'error'))
     );
   } else {
-    initAuth();
+    initAuth().catch(error => setMessage(error.message || '账号初始化失败。', 'error'));
   }
 })();
+

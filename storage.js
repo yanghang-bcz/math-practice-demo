@@ -5,8 +5,10 @@
 
   let currentUser = null;
   let syncTimer = null;
-  let syncRunning = false;
-  let syncQueued = false;
+  let syncTail = Promise.resolve();
+  let userGeneration = 0;
+  let resetting = false;
+  let syncReady = false;
   let pendingState = null;
   let lastSyncAt = null;
   let lastError = null;
@@ -15,12 +17,12 @@
   const syncedAttemptIds = new Set();
 
   function client() {
-    return window.CalcDailySupabase?.client || null;
+    return window.CalcDailyCloudBase?.client || null;
   }
 
   function configured() {
     return Boolean(
-      window.CalcDailySupabase?.configured &&
+      window.CalcDailyCloudBase?.configured &&
       client()
     );
   }
@@ -47,11 +49,20 @@
   }
 
   function setUser(user) {
-    currentUser = user || null;
-
-    if (!currentUser) {
-      syncedAttemptIds.clear();
+    if ((currentUser?.id || null) !== (user?.id || null)) {
+      userGeneration++;
+      clearTimeout(syncTimer);
       lastQueuedState = null;
+      pendingState = null;
+      syncedAttemptIds.clear();
+      syncReady = false;
+    }
+    currentUser = user || null;
+  }
+
+  function assertUser(userId, generation) {
+    if (generation !== userGeneration || currentUser?.id !== userId) {
+      throw new Error('账号状态已改变，本次同步已取消。');
     }
   }
 
@@ -290,8 +301,7 @@
     );
   }
 
-  async function upsertCoreState(state, now) {
-    const userId = currentUser.id;
+  async function upsertCoreState(state, now, userId) {
     const snapshot = sanitizeState(state);
 
     await throwIfError(
@@ -456,7 +466,7 @@
     }
   }
 
-  async function upsertAttempts(state, full = false) {
+  async function upsertAttempts(state, full = false, userId, generation) {
     const history = Array.isArray(state?.history)
       ? state.history
       : [];
@@ -470,7 +480,7 @@
     const rows = pending
       .filter(item => item?.id)
       .map(item => ({
-        user_id: currentUser.id,
+        user_id: userId,
         id: item.id,
         question_id: item.questionId || null,
         module: item.module || null,
@@ -522,6 +532,7 @@
     const chunkSize = 100;
 
     for (let i = 0; i < rows.length; i += chunkSize) {
+      assertUser(userId, generation);
       const chunk = rows.slice(i, i + chunkSize);
 
       await throwIfError(
@@ -534,65 +545,49 @@
         'attempts'
       );
 
+      assertUser(userId, generation);
       chunk.forEach(item => syncedAttemptIds.add(item.id));
     }
   }
 
-  async function syncNow(state, options = {}) {
-    if (!configured() || !currentUser || !state) {
-      return false;
+  function syncNow(state, options = {}) {
+    if (!configured() || !currentUser || !state || resetting) return Promise.resolve(false);
+    if (!syncReady && !options.bootstrap) {
+      return resolveAfterSignIn(state).then(() => true);
     }
-
-    if (syncRunning) {
-      syncQueued = true;
-      lastQueuedState = clone(state);
-      return false;
-    }
-
-    syncRunning = true;
-    lastError = null;
-    emitStatus('syncing', '正在同步学习记录…');
-
-    try {
-      const now = isoNow();
-
-      await upsertProfile(currentUser, now);
-      await upsertCoreState(state, now);
-      await upsertAttempts(state, Boolean(options.full));
-
-      lastSyncAt = now;
+    const user = clone(currentUser);
+    const generation = userGeneration;
+    const snapshot = clone(state);
+    const operation = syncTail.then(async () => {
+      assertUser(user.id, generation);
       lastError = null;
-      emitStatus('synced', '云端已同步');
-
-      return true;
-
-    } catch (error) {
-      lastError = error.message || String(error);
-      console.warn('CalcDaily 云端同步失败', error);
-      emitStatus('error', lastError);
-
-      throw error;
-
-    } finally {
-      syncRunning = false;
-
-      if (syncQueued) {
-        syncQueued = false;
-
-        const queued = lastQueuedState;
-        lastQueuedState = null;
-
-        if (queued) {
-          queueMicrotask(() => {
-            syncNow(queued).catch(() => {});
-          });
+      emitStatus('syncing', '正在同步学习记录…');
+      try {
+        const now = isoNow();
+        await upsertProfile(user, now);
+        assertUser(user.id, generation);
+        await upsertCoreState(snapshot, now, user.id);
+        assertUser(user.id, generation);
+        await upsertAttempts(snapshot, Boolean(options.full), user.id, generation);
+        assertUser(user.id, generation);
+        lastSyncAt = now;
+        lastError = null;
+        emitStatus('synced', '云端已同步');
+        return true;
+      } catch (error) {
+        if (generation === userGeneration) {
+          lastError = error.message || String(error);
+          emitStatus('error', lastError);
         }
+        throw error;
       }
-    }
+    });
+    syncTail = operation.catch(() => {});
+    return operation;
   }
 
   function queueSync(state) {
-    if (!configured() || !currentUser || !state) {
+    if (!configured() || !currentUser || !state || resetting || !syncReady) {
       return;
     }
 
@@ -615,6 +610,8 @@
       return localState;
     }
 
+    const userId = currentUser.id;
+    const generation = userGeneration;
     emitStatus('loading', '正在读取云端学习记录…');
 
     const localOwner =
@@ -633,7 +630,8 @@
         : (localState || {});
 
     const cloudRow =
-      await loadCloudSnapshot(currentUser.id);
+      await loadCloudSnapshot(userId);
+    assertUser(userId, generation);
 
     let merged;
 
@@ -659,8 +657,10 @@
         merged._meta?.localUpdatedAt || isoNow()
     };
 
-    await syncNow(merged, { full: true });
+    await syncNow(merged, { full: true, bootstrap: true });
 
+    assertUser(userId, generation);
+    syncReady = true;
     pendingState = clone(merged);
 
     return merged;
@@ -677,41 +677,56 @@
   async function resetRemote() {
     if (!configured() || !currentUser) return true;
 
+    if (resetting) throw new Error('正在清空，请稍候。');
+    resetting = true;
+    userGeneration++;
+    const generation = userGeneration;
+    clearTimeout(syncTimer);
+    lastQueuedState = null;
+    pendingState = null;
+    // 等待已经发出的请求结束，再删除，避免旧进度在清空后重新写回。
+    await syncTail;
     emitStatus('syncing', '正在清空云端学习记录…');
 
-    const userId = currentUser.id;
+    const userId = currentUser?.id;
+    try {
+      assertUser(userId, generation);
 
-    const tables = [
-      'attempts',
-      'review_queue',
-      'checkins',
-      'topic_progress',
-      'module_progress',
-      'user_settings',
-      'user_state'
-    ];
+      const tables = [
+        'attempts',
+        'review_queue',
+        'checkins',
+        'topic_progress',
+        'module_progress',
+        'user_settings',
+        'user_state'
+      ];
 
-    for (const table of tables) {
-      const result = await client()
-        .from(table)
-        .delete()
-        .eq('user_id', userId);
+      for (const table of tables) {
+        assertUser(userId, generation);
+        const result = await client()
+          .from(table)
+          .delete()
+          .eq('user_id', userId);
 
-      if (result.error) {
-        lastError = result.error.message;
-        emitStatus('error', lastError);
-        throw new Error(
-          `清空 ${table} 失败：${result.error.message}`
-        );
+        if (result.error) {
+          lastError = result.error.message;
+          emitStatus('error', lastError);
+          throw new Error(
+            `清空 ${table} 失败：${result.error.message}`
+          );
+        }
       }
-    }
 
-    syncedAttemptIds.clear();
-    lastSyncAt = isoNow();
-    lastError = null;
-    emitStatus('synced', '云端学习记录已清空');
+      syncedAttemptIds.clear();
+      lastSyncAt = isoNow();
+      lastError = null;
+      assertUser(userId, generation);
+      syncReady = true;
+      emitStatus('synced', '云端学习记录已清空');
 
-    return true;
+      return true;
+    } finally { resetting = false; }
   }
 
   window.CalcDailyCloud = {
@@ -726,3 +741,4 @@
     mergeSnapshots
   };
 })();
+

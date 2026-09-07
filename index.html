@@ -1611,7 +1611,8 @@
     <div class="
       w-full
       max-w-md
-      overflow-hidden
+      max-h-[calc(100dvh-4rem)]
+      overflow-y-auto
       rounded-2xl
       border
       border-line
@@ -1657,7 +1658,7 @@
           leading-6
           text-clay
         ">
-          Supabase 尚未配置。请先填写 <code>supabase-client.js</code> 中的项目 URL 和 Publishable / Anon Key，再执行数据库 SQL。
+          CloudBase 尚未就绪。请填写 <code>cloudbase-client.js</code> 中的 Publishable Key，并确认 SDK 已加载。游客模式仍可使用。
         </div>
 
         <div id="signedOutPanel">
@@ -1719,6 +1720,12 @@
                 py-3
                 text-sm
               " placeholder="you@example.com" />
+            </div>
+
+            <div id="authCodeField" class="hidden">
+              <button id="authSendCodeBtn" type="button" class="mb-3 rounded-xl border border-line bg-white px-3.5 py-2.5 text-xs font-medium disabled:opacity-50">发送邮箱验证码</button>
+              <label for="authCodeInput" class="block text-xs font-medium">验证码</label>
+              <input id="authCodeInput" type="text" autocomplete="one-time-code" inputmode="numeric" maxlength="12" disabled class="mt-2 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-sm" placeholder="输入邮件中的验证码" />
             </div>
 
             <div>
@@ -1859,10 +1866,11 @@
     transition
   "></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./supabase-client.js"></script>
+  <script src="https://static.cloudbase.net/cloudbase-js-sdk/3.9.2/cloudbase.full.js"></script>
+  <script src="./cloudbase-client.js"></script>
   <script src="./storage.js"></script>
   <script src="./auth.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
+
