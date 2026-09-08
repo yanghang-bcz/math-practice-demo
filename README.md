@@ -1,7 +1,6 @@
-```markdown
 <div align="center">
 
-<h1>Calc<br>Daily</h1>
+<h1>Calc Daily</h1>
 
 <p>
   Adaptive Calculus Practice for Chinese Postgraduate Entrance Exams
@@ -111,29 +110,29 @@ CalcDaily 内部使用简化的 **1PL-IRT + Elo-style update** 估计用户能�
 
 预测答对概率：
 
-\[
+$$
 P=\frac{1}{1+e^{-0.9(\theta-b)}}
-\]
+$$
 
 能力更新：
 
-\[
+$$
 \theta_{new}=\theta_{old}+K(R-P)W
-\]
+$$
 
 其中：
 
-- \(\theta\) 为当前能力
-- \(b\) 为题目难度
-- \(R\) 为真实作答结果
-- \(P\) 为系统预测正确概率
-- \(W\) 用于处理不同错误类型的影响
+- $\theta$ 为当前能力
+- $b$ 为题目难度
+- $R$ 为真实作答结果
+- $P$ 为系统预测正确概率
+- $W$ 用于处理不同错误类型的影响
 
 同时采用动态学习速率：
 
-\[
+$$
 K(n)=0.15+0.35e^{-n/30}
-\]
+$$
 
 新用户调整更快，随着答题样本增加逐渐趋于稳定。
 
@@ -221,12 +220,15 @@ DeepSeek 被嵌入 CalcDaily 的核心学习流程，而不是作为独立 Chatb
 当前主要承担：
 
 #### Generate
+
 根据模块、知识点和目标难度生成题目。
 
 #### Judge
+
 判断用户答案与标准答案是否数学等价。
 
 #### Evaluate
+
 辅助评估题目难度与属性。
 
 同时加入：
@@ -316,8 +318,6 @@ Daily Practice → Learning Analysis
 
 最终删除。
 
-原因很简单：
-
 不同学生完成同一道考研数学题的时间差异可能非常大。
 
 对学习时间做一个看似精准、实际并不可靠的预测，并不能帮助用户做出更好的决策。
@@ -366,42 +366,42 @@ AI 只出现在真正需要它的位置：
 ## Product Architecture
 
 ```text
-                         ┌─────────────────┐
-                         │ Ability Diagnosis│
-                         └────────┬────────┘
-                                  │
-                                  ▼
-┌──────────────┐        ┌───────────────────┐
-│ User Settings │───────▶│   Daily Practice  │
-└──────────────┘        └─────────┬─────────┘
-                                  │
-                                  ▼
+                         ┌───────────────────┐
+                         │ Ability Diagnosis │
+                         └─────────┬─────────┘
+                                   │
+                                   ▼
+┌───────────────┐        ┌───────────────────┐
+│ User Settings │───────▶│  Daily Practice   │
+└───────────────┘        └─────────┬─────────┘
+                                   │
+                                   ▼
                          ┌───────────────────┐
                          │ Question Generate │
                          └─────────┬─────────┘
-                                  │
-                                  ▼
+                                   │
+                                   ▼
                          ┌───────────────────┐
                          │    User Answer    │
                          └─────────┬─────────┘
-                                  │
-                                  ▼
+                                   │
+                                   ▼
                          ┌───────────────────┐
                          │     AI Judge      │
                          └─────────┬─────────┘
-                                  │
-                    ┌─────────────┴──────────────┐
-                    ▼                            ▼
-            Ability Update               Topic Mastery
-                    │                            │
-                    └─────────────┬──────────────┘
-                                  ▼
-                         Adaptive Next Question
-                                  │
+                                   │
+                    ┌──────────────┴──────────────┐
+                    ▼                             ▼
+            Ability Update                Topic Mastery
+                    │                             │
+                    └──────────────┬──────────────┘
+                                   ▼
+                        Adaptive Next Question
+                                   │
                        Wrong Answer if needed
-                                  │
-                                  ▼
-                            Review Queue
+                                   │
+                                   ▼
+                             Review Queue
 ```
 
 ---
@@ -630,4 +630,3 @@ CalcDaily 并不是一次为了快速完成作品集而生成的项目。
 [完整 PRD](./docs/PRD.md)
 
 </div>
-```
