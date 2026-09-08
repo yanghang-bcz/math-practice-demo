@@ -1,491 +1,633 @@
-# CalcDaily · Adaptive v3 Full
+```markdown
+<div align="center">
 
-CalcDaily 是一个面向中国考研高等数学学习者的自适应每日刷题 Web App 学生作品集项目。
+<h1>Calc<br>Daily</h1>
 
-这一版的目标不是“删掉旧界面再做一套新的”，而是在原有 CalcDaily 功能上做增量完善：原来的数据仪表盘、最近记录、能力诊断、每日刷题、错题复习队列、2 天 / 5 天复习调度、连续 3 次答对退出高频复习、打卡统计、AI 判题、LocalStorage、DeepSeek 状态检测与数据重置都保留；同时加入 L1–L12、连续 Ability θ、动态难度、固定难度、手动起点、训练模式、Topic Mastery、错误类型权重、Confidence、Difficulty Evaluator、未来 Anchor Calibration 接口和手机端公式修复。
+<p>
+  Adaptive Calculus Practice for Chinese Postgraduate Entrance Exams
+</p>
 
-## 文件结构
+<p>
+  <a href="https://calcdaily-v4-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/">
+    <strong>在线体验 →</strong>
+  </a>
+  &nbsp;&nbsp;&nbsp;
+  <a href="./docs/PRD.md">
+    <strong>完整 PRD →</strong>
+  </a>
+</p>
 
-```text
-math-practice-demo/
-├── index.html
-├── app.js
-├── api/
-│   └── deepseek.js
-├── README.md
-└── plan.md
-```
+</div>
 
-本版本需要完整替换：
+---
 
-- `index.html`
-- `app.js`
-- `api/deepseek.js`
-- `README.md`
+## About CalcDaily
 
-`plan.md` 可以继续保留原文件。
+**CalcDaily** 是一款面向中国考研高等数学学习者的自适应每日刷题 Web App。
 
-不需要 npm，不需要数据库，也不需要修改 Vercel 环境变量名称。仍使用：
+它并不是一个简单的「输入 Prompt → AI 生成一道题」项目。
 
-```text
-DEEPSEEK_API_KEY
-```
+我真正想解决的是一个更具体的问题：
 
-## 原有功能保留检查
+> 学生已经开始复习以后，**今天应该做什么题，以及这道题做完以后，下一道题应该是什么。**
 
-- 数据仪表盘
-- 今日完成题数
-- 连续打卡
-- 待复习数量
-- 累计正确率
-- 极限 / 导数 / 积分模块表现
-- 薄弱考点
-- 最近作答记录
-- 能力诊断入口与诊断结果摘要
-- 每日刷题
-- AI 数学等价判题
-- 错题复习
-- 可视化复习队列
-- 首次错题 2 天后复习
-- 再次做错 5 天后复习
-- 复习连续答对 3 次退出高频队列
-- 28 天打卡统计
-- DeepSeek API 状态
-- LocalStorage 本地学习记录
-- 重置本地数据
+传统刷题通常按照固定章节、固定题单或统一难度推进，但不同学生的能力不同，同一个学生在不同知识点上的掌握程度也不同。
 
-## 新增：L1–L12 临时难度体系
-
-当前版本使用 provisional Soft Anchor：
-
-- L1–L3：教材基础到熟练
-- L4–L6：考研基础到标准
-- L7–L9：考研中上到高难
-- L10–L12：竞赛型微积分计算与技巧挑战
-
-它目前不是经过真实考研 / 大学生数学竞赛题库统计校准的权威标尺。
-
-以后加入真实 Anchor 后，只更新 Calibration Layer，不重写自适应引擎。
-
-## 用户能力不直接用整数 Level 计算
-
-每个模块独立保存连续能力值：
+因此 CalcDaily 尝试建立一个持续更新的学习闭环：
 
 ```text
-Limit Ability       θ = 7.36
-Derivative Ability  θ = 6.82
-Integral Ability    θ = 7.91
+能力诊断
+   ↓
+每日练习
+   ↓
+作答与判题
+   ↓
+能力 / 知识点状态更新
+   ↓
+动态选择下一题
+   ↓
+错题进入复习队列
+   ↓
+再次练习
 ```
 
-Level 主要用于 UI 显示。
+核心不是生成更多题，而是：
 
-核心预测函数：
+> **让每一次作答真正改变之后的练习。**
 
-```text
-P(correct) = 1 / (1 + exp(-0.9 * (theta - b)))
-```
+---
 
-其中：
+## Core Features
 
-- `theta`：用户能力
-- `b`：题目难度
+### Adaptive Daily Practice
 
-动态学习率：
+每日练习并不会在 Session 开始时一次性固定全部题目。
 
-```text
-K(n) = 0.15 + 0.35 * exp(-n / 30)
-```
+每完成一道题，系统都会结合：
+
+- 当前模块能力
+- 知识点掌握度
+- 题目难度
+- 最近作答表现
+- 错误类型
+- 当前训练模式
+
+重新决定下一道题。
+
+当前支持：
+
+- 极限
+- 导数
+- 积分
+- 8 / 10 / 12 题每日练习
+- 自适应难度
+- 固定难度
+- 基础巩固 / 均衡 / 考研冲刺 / 高阶挑战模式
+
+---
+
+### Ability Diagnosis
+
+首次使用时，CalcDaily 会推荐进行能力诊断，用于快速建立初始能力估计。
+
+但诊断并不是强制流程。
+
+用户可以：
+
+- 完成能力诊断
+- 暂时跳过
+- 通过之后的正常练习逐渐完成能力校准
+- 在「学习分析」中重新进行诊断
+
+这是一次刻意的产品取舍：
+
+> 诊断有价值，但不应该成为开始学习之前必须跨过的一道门槛。
+
+---
+
+### Adaptive Ability Model
+
+CalcDaily 内部使用简化的 **1PL-IRT + Elo-style update** 估计用户能力。
+
+预测答对概率：
+
+\[
+P=\frac{1}{1+e^{-0.9(\theta-b)}}
+\]
 
 能力更新：
 
-```text
-theta_new = theta_old + K * (R - P) * W
-```
+\[
+\theta_{new}=\theta_{old}+K(R-P)W
+\]
 
-- `R = 1`：答对
-- `R = 0`：答错
-- `W`：题目用途 / 错误类型权重
+其中：
 
-因此：高于当前能力很多的题答对会明显提高 Ability；明显低于当前能力的题答错会明显降低 Ability；高难题答错只轻微影响能力。
+- \(\theta\) 为当前能力
+- \(b\) 为题目难度
+- \(R\) 为真实作答结果
+- \(P\) 为系统预测正确概率
+- \(W\) 用于处理不同错误类型的影响
 
-## Level 防横跳
+同时采用动态学习速率：
 
-显示等级使用缓冲区，而不是简单 `round(theta)`。
+\[
+K(n)=0.15+0.35e^{-n/30}
+\]
 
-例如当前 Lv.7，不会因为 `7.49 → 7.51 → 7.48` 在 Lv.7 / Lv.8 之间来回变化。
+新用户调整更快，随着答题样本增加逐渐趋于稳定。
 
-内部 Ability 可以超过 12，界面显示 `Lv.12+`，为后续真实竞赛 Anchor 留出空间。
+前端使用 **L1–L12** 表达难度等级，但内部能力值并不会被强制限制在 L12。
 
-## 自适应能力诊断
+---
 
-诊断不是每个人固定答 9 道或 20 道。
+### Module Ability + Topic Mastery
 
-每个模块从中间难度开始，早期使用较大的探测步长：
+CalcDaily 不只记录一个笼统的“数学水平”。
 
-```text
-L6 ✓ → 向 L8 探测
-L8 ✓ → 向 L10 探测
-L10 ✗ → 回到 L9 附近收缩区间
-```
+系统分别维护：
 
-系统同时维护 Ability 与 Confidence。通常每个模块约 5–8 道，达到足够稳定的置信度就结束；若结果不稳定则继续到上限。
+- 极限能力
+- 导数能力
+- 积分能力
 
-测评只是建议。用户可以完全跳过。
+同时记录更细粒度的 **Topic Mastery**。
 
-## 手动难度与固定难度
+例如，一个学生的导数整体水平可能较高，但仍然可能持续在：
 
-“难度设置”里可以分别设置：
+> 隐函数与参数方程结合的高阶导数
 
-```text
-极限       Lv.1–12
-导数       Lv.1–12
-积分       Lv.1–12
-```
+出现错误。
 
-两种核心模式：
+因此 Adaptive Engine 不只根据模块能力出题，也会考虑局部知识点表现。
 
-### 动态自适应
+---
 
-手动等级可以作为初始 Ability。之后系统继续根据真实表现修正。
+### Error-aware Learning
 
-### 固定难度
+CalcDaily 不把所有错误简单视为一次“答错”。
 
-始终按用户指定 Level 出题，不因答对或答错自动升降。
+用户可以区分：
 
-## 训练模式
+- **不会做**
+- **方法想错**
+- **计算粗心**
+- **输入失误**
 
-- 均衡自适应：巩固 + 当前能力 + 少量挑战
-- 基础巩固：增加低一档题目
-- 考研冲刺：增加薄弱点与中高难训练
-- 高阶挑战：增加高于当前 Ability 的挑战题
+不同错误会产生不同的学习影响。
 
-每日题量支持：8 / 10 / 12。
+其中 **输入失误**：
 
-## 每日训练动态调度
+- 不降低能力估计
+- 不计入错误统计
+- 不影响 Topic Mastery
+- 不进入错题复习队列
 
-自适应模式下不会一次把整天题单难度写死。
+避免把交互错误错误地解释成数学能力下降。
 
-每完成一道题后：
+---
 
-```text
-作答
-→ 更新 Ability / Topic Mastery
-→ 分析最近状态
-→ 选择巩固 / 主训练 / 挑战 / 到期复习
-→ 决定下一道题难度
-```
+### Review Queue
 
-固定模式不会修改用户 Ability，仅记录正确率与考点表现。
+CalcDaily 没有把错题设计成一个只负责保存历史记录的“错题本”。
 
-## Topic Mastery
+错误会进入后续学习流程。
 
-总体模块 Ability 与具体考点能力分开。
+系统记录：
 
-例如：
+- 错误知识点
+- 历史错误
+- 当前复习状态
+- 连续答对进度
 
-```text
-Integral Ability = 7.4
-
-换元积分       8.1
-分部积分       7.6
-有理函数积分   6.4
-反常积分       5.8
-```
-
-每日训练会优先考虑薄弱考点，而不是只看“积分 Lv.7”。
-
-## 错误类型
-
-答错后可标记：
-
-- 不会做
-- 方法想错
-- 计算粗心
-- 输入失误
-
-不同错误对 Ability 的影响不同。
-
-输入失误会撤销本题对 Ability、正确率和错题队列的影响。
-
-## 错题复习
-
-保留原来的简单间隔复习：
-
-- 首次做错 → 2 天后
-- 再次做错 → 5 天后
-- 复习连续答对 3 次 → 退出高频复习
-
-错题复习对总体 Ability 降权，避免系统专门练弱点后又用这些弱点过度降低总等级；但 Topic Mastery 仍正常更新。
-
-## 久未练习
-
-久未练习不会直接降低 Ability，只降低有效 Confidence。
-
-系统之后通过验证题重新确认用户是否仍维持原水平。
-
-## AI 难度评估
-
-生成题目的 AI 不拥有最终难度解释权。
-
-流程：
+当前复习机制以：
 
 ```text
-Target Difficulty
-→ DeepSeek Generator
-→ Candidate Question
-→ Independent Difficulty Evaluator
-→ provisionalDifficulty
-→ Calibration Layer
-→ calibratedDifficulty
+0/3 → 1/3 → 2/3 → 3/3
 ```
 
-评估维度包括：
+表达连续复习表现。
 
-- Recognition Difficulty
-- Technique Depth
-- Calculation Complexity
-- Knowledge Coupling
+达到条件后，该知识点退出当前高频复习队列。
 
-## 手机端数学公式
+> 错题不是过去发生过什么，而是未来应该再做什么。
 
-题目优先使用结构化字段：
+---
 
-```json
-{
-  "instruction": "计算极限",
-  "expression": "\\lim_{x\\to0}\\frac{\\sin 3x}{2x}"
-}
-```
+### AI-native Question System
 
-前端统一用 MathJax display mode 渲染，并给长公式设置独立横向滚动区域，避免手机页面出现裸 `\\lim` / `\\frac` 或整页被公式撑宽。
+DeepSeek 被嵌入 CalcDaily 的核心学习流程，而不是作为独立 Chatbot 存在。
 
-同时保留对旧 `prompt` / 裸 LaTeX 的兼容处理。
+当前主要承担：
 
-## 未来 Anchor Calibration
+#### Generate
+根据模块、知识点和目标难度生成题目。
 
-当前浏览器控制台暴露：
+#### Judge
+判断用户答案与标准答案是否数学等价。
 
-```js
-CalcDailyCalibration.apply([
-  { provisional: 2, real: 2.0 },
-  { provisional: 4, real: 3.7 },
-  { provisional: 6, real: 5.4 },
-  { provisional: 8, real: 7.2 },
-  { provisional: 10, real: 9.5 },
-  { provisional: 12, real: 12.0 }
-], 'v1-anchor');
-```
+#### Evaluate
+辅助评估题目难度与属性。
 
-以上数字只是接口示例，不是真实难度标准。
+同时加入：
 
-未来拿到真实 Anchor 后，可以换成真实映射点。
+- JSON 输出约束
+- Response Validation
+- Retry
+- Fallback
+- Question Prefetch
+- 异常处理
 
-重置临时模型：
+尽量降低模型不稳定性对连续学习流程的影响。
 
-```js
-CalcDailyCalibration.reset();
-```
+---
 
-导出当前数据：
+### Learning Analysis
 
-```js
-CalcDailyCalibration.exportData();
-```
+学习数据集中放在独立的 **学习分析** 页面，包括：
 
-历史记录会保存：
+- 今日完成情况
+- 连续学习
+- 待复习数量
+- 累计正确率
+- 极限 / 导数 / 积分能力
+- 薄弱考点
+- Topic Mastery
+- 最近练习记录
 
-- `requestedDifficulty`
-- `provisionalDifficulty`
-- `calibratedDifficulty`
-- `difficultyModelVersion`
-- `difficultyConfidence`
-- `difficultyDimensions`
-- `abilityBefore`
-- `abilityAfter`
+这些内容没有被放在默认首页。
 
-因此以后可以重新校准，而不是推翻自适应系统。
+---
 
-## LocalStorage
+## Product Decisions
 
-新版主键：
+CalcDaily 经历过多轮产品迭代。
+
+很多最终保留下来的设计，并不是最初版本就存在。
+
+### 01 · Dashboard 不再是首页
+
+早期版本将学习数据仪表盘作为默认入口。
+
+后来我重新审视了学习产品最核心的使用场景：
+
+> 用户打开 CalcDaily，大多数时候不是为了评价过去，而是为了开始今天的学习。
+
+因此重新设计信息架构：
 
 ```text
-calcDaily.v2
+Before
+Dashboard → Daily Practice
+
+After
+Daily Practice → Learning Analysis
 ```
 
-首次加载会尝试迁移旧：
+「今日练习」成为默认首页。
+
+学习数据被移动至用户主动查看的「学习分析」。
+
+---
+
+### 02 · 能力诊断退出主导航
+
+能力诊断属于首次使用和低频校准功能。
+
+它不应该长期与：
+
+- 今日练习
+- 错题复习
+- 学习分析
+
+占据相同的信息层级。
+
+因此诊断入口最终只保留在：
+
+- 首次使用首页
+- 学习分析
+
+---
+
+### 03 · 不预测“今天需要学习多久”
+
+早期曾考虑根据题量显示：
+
+> 预计约 XX 分钟
+
+最终删除。
+
+原因很简单：
+
+不同学生完成同一道考研数学题的时间差异可能非常大。
+
+对学习时间做一个看似精准、实际并不可靠的预测，并不能帮助用户做出更好的决策。
+
+---
+
+### 04 · Adaptive 应该被体验，而不是被解释
+
+早期界面曾展示：
+
+- Ability θ
+- Confidence
+- Adaptive algorithm
+- 系统为什么推荐这道题
+
+这些信息后来被逐渐移出主要界面。
+
+用户不需要理解 IRT 或内部能力参数。
+
+> 如果 Adaptive 有价值，它应该体现在“接下来的题越来越合适”，而不是产品不断告诉用户自己很智能。
+
+---
+
+### 05 · AI 是基础设施，而不是产品中心
+
+CalcDaily 没有为了体现 AI 而额外加入一个 AI Chat 页面。
+
+AI 只出现在真正需要它的位置：
 
 ```text
-calcDaily.v1
+生成
+判题
+评估
 ```
 
-v4 起加入 Supabase 邮箱账号与云端同步。游客仍使用 LocalStorage；登录后 LocalStorage 作为本地缓存，Supabase 作为跨设备同步层。
+产品关注的并不是：
 
-## 部署
+> 能不能再增加一个 AI 功能。
 
-保持现有 Vercel 部署即可。
+而是：
 
-Vercel Environment Variables：
+> AI 能不能改善下一次真实学习行为。
+
+---
+
+## Product Architecture
 
 ```text
-DEEPSEEK_API_KEY=你的 DeepSeek API Key
+                         ┌─────────────────┐
+                         │ Ability Diagnosis│
+                         └────────┬────────┘
+                                  │
+                                  ▼
+┌──────────────┐        ┌───────────────────┐
+│ User Settings │───────▶│   Daily Practice  │
+└──────────────┘        └─────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌───────────────────┐
+                         │ Question Generate │
+                         └─────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌───────────────────┐
+                         │    User Answer    │
+                         └─────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌───────────────────┐
+                         │     AI Judge      │
+                         └─────────┬─────────┘
+                                  │
+                    ┌─────────────┴──────────────┐
+                    ▼                            ▼
+            Ability Update               Topic Mastery
+                    │                            │
+                    └─────────────┬──────────────┘
+                                  ▼
+                         Adaptive Next Question
+                                  │
+                       Wrong Answer if needed
+                                  │
+                                  ▼
+                            Review Queue
 ```
 
-不要把 API Key 写进 `app.js`、`index.html` 或 GitHub。
+---
 
-## 建议测试顺序
+## Product Experience
 
-1. 首页确认 DeepSeek 已连接。
-2. 检查原有 Dashboard：今日进度、打卡、待复习、正确率、模块表现、薄弱考点、最近记录均存在。
-3. 手机打开极限 / 导数 / 积分题，确认公式为正常数学排版。
-4. 做能力诊断：连续答对应明显上探，遇错后回落收缩。
-5. 诊断结束后确认三个模块分别显示 Ability / Level / Confidence。
-6. 难度设置中手动设置 Level，并选择“作为自适应起点”。
-7. 切换固定难度，确认连续答对 / 答错不会修改 Level。
-8. 切回动态自适应，做高于当前 Ability 的题，确认 Ability 更新。
-9. 做错后分别测试“计算粗心”和“输入失误”。
-10. 检查错题是否进入可视化复习队列，且显示下一次复习日期。
-11. 完成每日训练，确认打卡统计保留。
-12. 检查“最近记录”是否继续展示最新作答。
-
-## 当前边界
-
-- L1–L12 仍是 provisional scale，不应宣传为已经经过真实考研 / 竞赛题库校准。
-- AI 出题、难度评估和判题仍可能出错。
-- 当前仍仅覆盖高数中的极限、导数、积分训练。
-- 游客模式仍只使用 LocalStorage；登录用户会同步至 Supabase。
-
-
-## v3.1 修复
-
-- 修复页面切换时把所有 `.view` 隐藏后无法重新显示当前页面的问题。
-- 原因：`$()` 封装使用 `getElementById`，但 `switchView()` 误传入了带 `#` 的 CSS 选择器。
-- 修复后 Dashboard、能力诊断、每日刷题、错题复习、打卡统计和难度设置均可正常切换显示。
-
-## v3.2 出题速度优化
-
-在不改变原有页面和自适应难度逻辑的前提下，优化 AI 出题等待：
-
-- 进入“能力诊断 / 每日刷题”页面时后台预热第一题。
-- 用户阅读和作答当前题时，后台推测性预取下一题；实际结果不匹配时会自动丢弃，避免牺牲自适应准确性。
-- 判题完成后立即继续后台准备下一题，点击“下一题”优先复用已生成结果。
-- 诊断题的独立难度评估改为后台运行，不再阻塞题目展示；提交时最多额外等待 0.9 秒。
-- 每日/复习题当前使用生成器 provisional difficulty，避免每题额外调用一次 Difficulty Evaluator；真实 Anchor 接入后的 Calibration Layer 保持不变。
-- 单题生成输出预算由固定 7000 tokens 改为按题量动态分配，解析限制为简洁 2–4 句、最多 3 个关键步骤。
-- Difficulty Evaluator 输出预算同步缩减，减少无意义的模型生成等待。
-
-本次没有修改 index.html 的页面结构，也没有删除任何现有功能。
-
-
-## v3.3 AI 服务稳定性修复
-
-- DeepSeek V4 Flash 请求显式关闭 thinking mode，减少普通出题、判题和难度评估的额外推理等待。
-- 将“API 是否连接”和“某一次模型请求是否失败”拆开，单次超时/服务繁忙不再误显示为整个 AI 服务未连接。
-- 最近一次请求失败时会显示简短原因，例如余额不足、API Key 无效、请求过于频繁、服务繁忙或超时。
-- DeepSeek 上游 HTTP 状态码会由 Serverless Function 原样传给前端，便于定位 401 / 402 / 429 / 503 等问题。
-- 其他页面、预取机制、自适应难度算法、错题复习和 Anchor 校准接口均未修改。
-
-
-## v4.0 个人账号与云端学习记录
-
-本版在不改动 DeepSeek 出题/判题和自适应算法的前提下加入：
-
-- Supabase Auth 邮箱 + 密码注册 / 登录 / 退出。
-- 游客模式继续可用，不强制注册。
-- 首次登录自动合并当前浏览器 LocalStorage 与云端学习状态。
-- 登录后后台同步：
-  - 用户设置
-  - 极限 / 导数 / 积分 Ability、Level、Confidence
-  - Topic mastery
-  - 每一道作答 attempts
-  - 错题复习队列
-  - 打卡日期
-  - 完整 learner-state snapshot
-- 当前 activeSession 继续只保存在本机，不强制跨设备续做。
-- LocalStorage 保留为本地缓存，云端异常不会阻止本机刷题。
-- 所有云端学习表均启用 Row Level Security；登录用户只能访问自己的 `user_id`。
-
-### 新增文件
+### Main Navigation
 
 ```text
-supabase-client.js
-storage.js
-auth.js
-supabase-schema.sql
+今日练习
+错题复习
+学习分析
+
+────────
+
+学习记录
+设置
 ```
 
-`api/deepseek.js` 无需修改。
+能力诊断不作为长期主导航。
 
-### Supabase 配置
+Desktop 侧边栏支持主动收起，在需要长时间做题时减少视觉干扰。
 
-1. 在 Supabase 创建项目。
-2. 打开 SQL Editor，完整执行 `supabase-schema.sql`。
-3. 打开 Project Settings / API，复制：
-   - Project URL
-   - Publishable Key（旧项目也可能显示 Anon Key）
-4. 编辑 `supabase-client.js`：
+---
 
-```js
-const SUPABASE_URL = 'https://xxxx.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = '你的 publishable/anon key';
+## AI Reliability
+
+AI 产品的稳定性不仅意味着：
+
+> 请求是否成功。
+
+也包括：
+
+- 响应速度是否稳定
+- 输出是否符合结构
+- 模型失败能否恢复
+- 用户是否需要承担错误
+
+因此 CalcDaily 将 AI Reliability 视为产品能力的一部分。
+
+关注：
+
+- Generate Success Rate
+- Judge Success Rate
+- Response Latency
+- Retry Rate
+- Validation Failure
+- Fallback Trigger
+
+---
+
+## Account & Cloud Sync
+
+CalcDaily 支持：
+
+### Guest Mode
+
+无需注册即可开始学习，本地保存数据。
+
+### Account Mode
+
+支持：
+
+- 邮箱注册
+- 邮箱验证
+- 登录
+- Nickname
+- 云端学习记录
+- 跨设备同步
+
+游客模式产生的数据在登录后仍需要尽量被保留，而不是因为注册账号而重新开始。
+
+---
+
+## Tech Stack
+
+### Frontend
+
+- HTML
+- JavaScript
+- Tailwind CSS
+- MathJax
+
+### Backend & Infrastructure
+
+- Tencent CloudBase
+- CloudBase Authentication
+- CloudBase HTTP Functions
+- PostgreSQL
+- Cloud Sync
+- Static Hosting
+
+### AI
+
+- DeepSeek
+- Question Generation
+- Mathematical Equivalence Judging
+- Difficulty Evaluation
+- Question Prefetch
+- Fallback Strategy
+
+---
+
+## China-first Deployment
+
+CalcDaily 的核心用户主要位于中国大陆，因此部署过程中也考虑了实际网络环境。
+
+包括：
+
+- 从海外部署迁移至腾讯 CloudBase
+- Tailwind CSS 本地编译
+- MathJax 本地部署
+- 减少海外 CDN 依赖
+- DeepSeek API 通过服务端 HTTP Function 调用
+- API Key 不暴露至浏览器
+
+这部分并不是产品最显眼的功能，但直接决定了真实用户能否稳定使用。
+
+---
+
+## Design Principles
+
+CalcDaily 的设计目标不是成为一个第一眼非常炫的展示型网站。
+
+而是：
+
+> **一个可以持续打开、持续做题，而不会不断争夺注意力的学习工具。**
+
+当前设计原则包括：
+
+- Task-first homepage
+- Quiet visual hierarchy
+- Limited color system
+- Low-distraction motion
+- Structured whitespace
+- Collapsible navigation
+- No unnecessary algorithm explanation
+- No motivational copy overload
+- No excessive gamification
+
+---
+
+## Current Status
+
+### v1.0 Beta
+
+目前已经完成：
+
+- [x] 每日练习
+- [x] 能力诊断
+- [x] Adaptive Difficulty
+- [x] Fixed Difficulty
+- [x] Topic Mastery
+- [x] Error Classification
+- [x] Wrong-answer Review Queue
+- [x] Learning Analysis
+- [x] Learning Records
+- [x] DeepSeek Question Generation
+- [x] Mathematical Answer Judging
+- [x] AI Difficulty Evaluation
+- [x] Question Prefetch
+- [x] Guest Mode
+- [x] Account System
+- [x] Cloud Sync
+- [x] Mainland China Deployment
+- [x] Responsive UI
+- [x] Focus / Collapsible Sidebar
+
+---
+
+## What Comes Next
+
+CalcDaily 当前不再优先增加功能。
+
+下一阶段进入 **User Validation**。
+
+计划首先邀请真实考研数学学习者测试，并重点验证：
+
+1. 用户第一次打开是否知道如何开始；
+2. 用户是否愿意进行能力诊断；
+3. 自适应题目难度是否真正合适；
+4. 用户是否能够信任 AI 判题；
+5. Review Queue 是否真的能够促进二次复习；
+6. 哪些功能真实产生价值，哪些只是设计者自己的假设。
+
+之后的版本迭代将更多依据真实用户行为，而不是继续增加功能数量。
+
+---
+
+## Project Philosophy
+
+CalcDaily 并不是一次为了快速完成作品集而生成的项目。
+
+从最初的刷题 Demo，到后来加入：
+
+- 自适应能力模型
+- Topic Mastery
+- 错误类型
+- Review Queue
+- AI 判题
+- Prefetch
+- Auth
+- Cloud Sync
+- 国内部署
+- 信息架构重构
+- 多轮 UI 收敛
+
+很多今天看起来“理所当然”的设计，实际上都经历过推翻和重新判断。
+
+我在这个项目里真正想练习的也不是：
+
+> 如何把功能做得越来越多。
+
+而是：
+
+> **如何定义一个问题、建立产品机制、做出取舍，并最终用真实用户行为验证自己的判断。**
+
+---
+
+<div align="center">
+
+**CalcDaily · v1.0 Beta**
+
+[在线体验](https://calcdaily-v4-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/)
+&nbsp;·&nbsp;
+[完整 PRD](./docs/PRD.md)
+
+</div>
 ```
-
-浏览器端只能放 Publishable / Anon Key。
-
-**不要**把 `service_role` key 放进 GitHub、HTML 或浏览器 JS。
-
-### Email Auth
-
-Supabase Dashboard → Authentication → Providers → Email：
-
-- 开启 Email provider。
-- 开发阶段如果不想每次点邮件确认，可以按项目需要调整 Confirm email。
-- 如果开启邮箱确认，注册后用户需要先完成邮件验证再登录。
-
-### 数据同步策略
-
-```text
-游客
-  ↓
-LocalStorage
-
-登录
-  ↓
-本地状态 + 云端状态合并
-  ↓
-LocalStorage 立即写入
-  ↓
-约 0.9 秒 debounce
-  ↓
-Supabase 后台同步
-```
-
-这样刷题 UI 不等待数据库写入。
-
-### 数据表
-
-```text
-profiles
-user_state
-user_settings
-module_progress
-topic_progress
-attempts
-review_queue
-checkins
-```
-
-其中 `user_state` 是恢复应用状态的快照；其余表保留结构化学习数据，方便后续做学习报告、算法校准和产品分析。
-
-### 推荐测试顺序
-
-1. 不配置 Supabase 时打开应用，确认仍可游客刷题。
-2. 配置 Supabase 并执行 SQL。
-3. 注册一个测试账号。
-4. 登录前游客模式先做 2–3 题。
-5. 登录，确认页面提示“云端已同步”。
-6. 刷新页面，确认账号保持登录。
-7. 做一道题后等待约 1 秒，在 Supabase Table Editor 检查 `attempts` / `user_state`。
-8. 换另一个浏览器登录同一账号，确认 Ability、历史、错题和打卡恢复。
-9. 退出账号，确认本机仍能以游客方式继续使用。
-10. 测试“重置学习数据”：登录状态下会同时清空该账号的本机与云端学习数据。
