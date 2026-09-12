@@ -1,56 +1,142 @@
-const Quality = require('../math-quality');
-module.exports = async function handler(req, res) {
-  res.setHeader('Cache-Control', 'no-store');
+const Quality = require('./math-quality');
+const http = require('http');
 
-  if (req.method === 'GET' && req.query?.health === '1') {
-    const configured = Boolean(process.env.DEEPSEEK_API_KEY);
+const PORT = Number(process.env.PORT || 9000);
 
-    return res
-      .status(configured ? 200 : 503)
-      .json({
+function sendJson(res, status, data) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store'
+  });
+
+  res.end(JSON.stringify(data));
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+
+    req.on('data', chunk => {
+      raw += chunk;
+
+      if (raw.length > 2 * 1024 * 1024) {
+        reject(new Error('Request body too large'));
+        req.destroy();
+      }
+    });
+
+    req.on('end', () => {
+      if (!raw) {
+        resolve({});
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(new Error('Invalid JSON body'));
+      }
+    });
+
+    req.on('error', reject);
+  });
+}
+
+const server = http.createServer(async (req, res) => {
+  if (req.method === 'OPTIONS') {
+  res.writeHead(204);
+  res.end();
+  return;
+}
+
+  const url = new URL(
+    req.url || '/',
+    `http://${req.headers.host || 'localhost'}`
+  );
+
+  if (
+    req.method === 'GET' &&
+    url.searchParams.get('health') === '1'
+  ) {
+    const configured = Boolean(
+      process.env.DEEPSEEK_API_KEY
+    );
+
+    sendJson(
+      res,
+      configured ? 200 : 503,
+      {
         ok: configured,
         service: 'deepseek',
         adaptiveDifficultyModel: 'v0-provisional'
-      });
+      }
+    );
+
+    return;
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    sendJson(res, 405, {
+      error: 'Method not allowed'
+    });
+
+    return;
   }
 
   const apiKey = process.env.DEEPSEEK_API_KEY;
 
   if (!apiKey) {
-    return res.status(500).json({
+    sendJson(res, 500, {
       error: 'DEEPSEEK_API_KEY is not configured.'
     });
+
+    return;
   }
 
-  const body = req.body || {};
-  const action = body.action;
-
   try {
+    const body = await readJsonBody(req);
+    const action = body.action;
+
     if (action === 'generate') {
-      const result = await generateQuestions(apiKey, body);
-      return res.status(200).json(result);
+      const result =
+        await generateQuestions(apiKey, body);
+
+      sendJson(res, 200, result);
+      return;
     }
 
     if (action === 'judge') {
-      const result = await judgeAnswer(apiKey, body);
-      return res.status(200).json(result);
+      const result =
+        await judgeAnswer(apiKey, body);
+
+      sendJson(res, 200, result);
+      return;
     }
 
     if (action === 'evaluate') {
-      const result = await evaluateQuestionDifficulty(apiKey, body);
-      return res.status(200).json(result);
+      const result =
+        await evaluateQuestionDifficulty(
+          apiKey,
+          body
+        );
+
+      sendJson(res, 200, result);
+      return;
     }
 
-    return res.status(400).json({ error: 'Unknown action' });
+    sendJson(res, 400, {
+      error: 'Unknown action'
+    });
 
   } catch (error) {
-    console.error('DeepSeek API error:', error);
+    console.error(
+      'DeepSeek API error:',
+      error
+    );
 
-    const upstreamStatus = Number(error?.statusCode);
+    const upstreamStatus =
+      Number(error?.statusCode);
+
     const status =
       Number.isInteger(upstreamStatus) &&
       upstreamStatus >= 400 &&
@@ -58,11 +144,19 @@ module.exports = async function handler(req, res) {
         ? upstreamStatus
         : 500;
 
-    return res.status(status).json({
-      error: error.message || 'DeepSeek request failed'
+    sendJson(res, status, {
+      error:
+        error.message ||
+        'DeepSeek request failed'
     });
   }
-};
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(
+    `CalcDaily DeepSeek service listening on ${PORT}`
+  );
+});
 
 
 /*

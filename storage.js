@@ -228,10 +228,16 @@
 
   function questionJsonFromHistory(item) {
     return {
+      question_id: item.question_id || item.questionId || item.id,
+      model: item.model || null,
+      generator_prompt_version: item.generator_prompt_version || null,
+      review_prompt_version: item.review_prompt_version || null,
+      verification: item.verification || null,
       instruction: item.instruction || '',
       expression: item.expression || '',
       prompt: item.prompt || '',
       answer: item.answer || '',
+      solution: item.solution || '',
       difficultyConfidence:
         item.difficultyConfidence ?? null,
       difficultyDimensions:
@@ -241,6 +247,11 @@
 
   function questionJsonFromReview(item) {
     return {
+      question_id: item.question_id || item.questionId || item.id,
+      model: item.model || null,
+      generator_prompt_version: item.generator_prompt_version || null,
+      review_prompt_version: item.review_prompt_version || null,
+      verification: item.verification || null,
       instruction: item.instruction || '',
       expression: item.expression || '',
       prompt: item.prompt || '',

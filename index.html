@@ -60,6 +60,8 @@
   ></script>
 
   <style>
+    body { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+    @media (max-width: 1023px) { #mainContent > div { padding-left: max(1.25rem, env(safe-area-inset-left, 0px)); padding-right: max(1.25rem, env(safe-area-inset-right, 0px)); } }
     :root {
       --paper: #f7f6f2;
       --surface: #fffdf9;
@@ -4439,6 +4441,7 @@
   <script src="./cloudbase-client.js"></script>
   <script src="./storage.js"></script>
   <script src="./auth.js"></script>
+  <script src="./math-quality.js"></script>
   <script src="./app.js"></script>
 
 

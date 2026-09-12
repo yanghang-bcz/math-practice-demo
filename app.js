@@ -1502,50 +1502,19 @@
     'https://calcdaily-d5g2titwue91551fb-1482769901.ap-shanghai.app.tcloudbase.com/api/deepseek';
 
 
-  async function apiCall(
-    action,
-    payload = {}
-  ) {
-    const response =
-      await fetch(
-        AI_API_URL,
-        {
-          method:
-            'POST',
-
-          headers: {
-            'Content-Type':
-              'application/json'
-          },
-
-          body:
-            JSON.stringify({
-              action,
-              ...payload
-            })
-        }
-      );
-
-
-    const data =
-      await response
-        .json()
-        .catch(
-          () => ({})
-        );
-
-
-    if (
-      !response.ok
-    ) {
-      throw new Error(
-        data.error ||
-        `AI 请求失败 (${response.status})`
-      );
-    }
-
-
-    return data;
+  async function apiCall(action, payload = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), action === 'generate' ? 190000 : 50000);
+    try {
+      const response = await fetch(AI_API_URL, {
+        method:'POST', signal:controller.signal,
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action,...payload})
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(data.error || `AI 请求失败 (${response.status})`);
+      return data;
+    } finally { clearTimeout(timer); }
   }
 
 
@@ -3228,94 +3197,51 @@
   }
 
 
-  async function judgeAnswer(
-    question,
-    userAnswer
-  ) {
-    if (
-      !String(
-        userAnswer ||
-        ''
-      ).trim()
-    ) {
-      return {
-        correct: false,
-        feedback:
-          '答案不能为空。'
-      };
-    }
+  function trustedQuestion(q) {
+    return q?.source === 'fallback'
+      ? FALLBACK_BANK.some(b => MathQuality.content(b) === MathQuality.content(q))
+      : MathQuality.approved(q);
+  }
 
-
-    if (
-      locallyEquivalent(
-        userAnswer,
-        question.answer
-      )
-    ) {
-      return {
-        correct: true,
-
-        feedback:
-          '与参考答案数学等价。'
-      };
-    }
-
-
+  function reportQuestionIssue(q, userAnswer = '', judgeResult = null) {
+    const report = {at: new Date().toISOString(), question_id: q.question_id || q.id,
+      question: {module:q.module, topic:q.topic, instruction:q.instruction, expression:q.expression, prompt:q.prompt},
+      canonical_answer:q.answer, solution:q.solution, user_answer:userAnswer,
+      judge_result:judgeResult, verification_result:q.verification || null};
     try {
-      const result =
-        await apiCall(
-          'judge',
-          {
-            question,
-            userAnswer
-          }
-        );
+      const key='calcDaily.questionIssues.v1';
+      const reports=JSON.parse(localStorage.getItem(key) || '[]');
+      localStorage.setItem(key,JSON.stringify([...reports.slice(-99),report]));
+    } catch(error) { console.warn('Question issue storage unavailable',error); }
+    window.dispatchEvent(new CustomEvent('calcdaily:question-issue',{detail:report}));
+  }
 
+  function voidQuestion(session,q,containerId,userAnswer='',verdict=null) {
+    reportQuestionIssue(q,userAnswer,verdict);
+    q.status='void';
+    const container=$(containerId);
+    container.innerHTML='<div class="question-card rounded-2xl bg-white p-6"><p>这道题存在异常，已自动作废。本题不会影响你的学习记录。</p><button id="retryQualityBtn" class="mt-4">重新生成 / 继续</button></div>';
+    $('retryQualityBtn').addEventListener('click',()=>{
+      session.currentQuestion=null;
+      saveState();
+      ensureCurrentQuestion(session);
+    },{once:true});
+  }
 
-      markApiRequestSuccess();
-
-
-      if (
-        typeof
-          result.correct ===
-        'boolean'
-      ) {
-        return {
-          correct:
-            result.correct,
-
-          feedback:
-            String(
-              result.feedback ||
-              ''
-            )
-        };
+  async function judgeAnswer(question,userAnswer) {
+    if(!trustedQuestion(question))return {correct:null,trusted:false};
+    const decision=MathQuality.compare(userAnswer,question.answer);
+    if(decision!=='uncertain')return {correct:decision==='equivalent',verdict:decision,trusted:true,method:'deterministic',feedback:decision==='equivalent'?'与参考答案数学等价。':'与参考答案不等价。'};
+    try {
+      const result=await apiCall('judge',{question,userAnswer});
+      if(result.trusted===true && ['equivalent','not_equivalent'].includes(result.verdict)) {
+        markApiRequestSuccess();
+        return {...result,correct:result.verdict==='equivalent'};
       }
-
-
-      throw new Error(
-        'AI 判题返回格式异常'
-      );
-
-    } catch (error) {
-      console.warn(
-        error
-      );
-
-      markApiRequestFailure(
-        error
-      );
-
-
-      return {
-        correct: null,
-
-        needsManualCheck:
-          true,
-
-        feedback:
-          `当前无法自动确认。参考答案：${question.answer}`
-      };
+      return {correct:null,trusted:false};
+    } catch(error) {
+      markApiRequestFailure(error);
+      return {correct:null,trusted:false};
     }
   }
 
@@ -3877,6 +3803,7 @@
 
           if (
             activeQuestion &&
+            activeQuestion.status !== 'void' &&
             activeQuestion.id ===
               question.id
           ) {
@@ -4056,6 +3983,8 @@
         data.questions[0];
 
 
+      if (!MathQuality.approved(q)) throw new Error('题目未通过独立质量审核');
+
       const provisionalDifficulty =
         clamp(
           Number(
@@ -4078,6 +4007,9 @@
 
 
       const question = {
+        question_id:q.question_id, model:q.model,
+        generator_prompt_version:q.generator_prompt_version, review_prompt_version:q.review_prompt_version,
+        verification:q.verification, status:'approved',
         id:
           q.id ||
           uid('ai'),
@@ -4107,8 +4039,7 @@
           '',
 
         answer:
-          q.answer ||
-          '',
+          String(q.answer ?? ''),
 
         solution:
           q.solution ||
@@ -4997,6 +4928,9 @@
     needsManualCheck = false
   }) {
     const record = {
+      question_id:question.question_id || question.id, model:question.model,
+      generator_prompt_version:question.generator_prompt_version, review_prompt_version:question.review_prompt_version,
+      verification:question.verification, solution:question.solution,
       id:
         uid(
           'attempt'
@@ -5158,6 +5092,9 @@
 
     if (!item) {
       item = {
+        question_id:question.question_id || question.id, model:question.model,
+        generator_prompt_version:question.generator_prompt_version, review_prompt_version:question.review_prompt_version,
+        verification:question.verification,
         id:
           uid(
             'review'
@@ -7379,6 +7316,11 @@
     }
 
 
+    if (!trustedQuestion(q) || q.status === 'void') {
+      voidQuestion(session,q,containerId);
+      return;
+    }
+
     const zone =
       q.zone ||
       q.planPurpose ||
@@ -7732,6 +7674,12 @@
       );
 
 
+    if (state.activeSession !== session || session.currentQuestion !== q) return;
+    if (verdict.trusted !== true || !trustedQuestion(q)) {
+      voidQuestion(session,q,containerId,userAnswer,verdict);
+      return;
+    }
+
     let abilityResult =
       null;
 
@@ -7986,6 +7934,12 @@
       containerId
     );
 
+
+    const issueButton=document.createElement('button');
+    issueButton.textContent='反馈题目问题';
+    issueButton.className='mt-4 text-sm';
+    issueButton.addEventListener('click',()=>{ reportQuestionIssue(q,userAnswer,verdict); toast('问题已记录，谢谢反馈。'); });
+    $(containerId).appendChild(issueButton);
 
     renderSidebarReviewBadge();
     renderDashboard();
