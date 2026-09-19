@@ -3197,30 +3197,10 @@
   }
 
 
-  /* 备用题的可信来源只有一处：Verified Fallback Bank。
-     先按 bankId 精确命中，再退回按题面比对。
-     注意这里不要求 source 一定是 'fallback'：复习队列里的历史条目可能没带
-     source/bankId（甚至没有 verification，因为备用题本身就不带快照）。
-     只要题面与题库逐字段一致，它就是同一道验证过的题，不该被判成不可信。 */
   function trustedQuestion(q) {
-    if (!q) return false;
-
-    if (!FALLBACK_BANK.length) {
-      return q.source === 'fallback' ? false : MathQuality.approved(q);
-    }
-
-    const byId =
-      q.bankId &&
-      FALLBACK_BANK.some(b => b.id === q.bankId);
-
-    if (byId) return true;
-
-    if (q.source === 'fallback' || !q.verification) {
-      const wanted = MathQuality.content(q);
-      if (FALLBACK_BANK.some(b => MathQuality.content(b) === wanted)) return true;
-    }
-
-    return MathQuality.approved(q);
+    return q?.source === 'fallback'
+      ? FALLBACK_BANK.some(b => MathQuality.content(b) === MathQuality.content(q))
+      : MathQuality.approved(q);
   }
 
   function reportQuestionIssue(q, userAnswer = '', judgeResult = null) {
@@ -3240,15 +3220,7 @@
     reportQuestionIssue(q,userAnswer,verdict);
     q.status='void';
     const container=$(containerId);
-
-    // 「标准答案有问题」和「题目本身不可信」要分开措辞：
-    // 前者不是学生的错，混在一起说会让人以为自己答错了。
-    const message =
-      verdict?.reason === MathQuality.JUDGE_REASONS.CANONICAL_SUSPECTED
-        ? '这道题的标准答案存在问题，已自动作废。这不是你的错，本题不会影响你的学习记录。'
-        : '这道题存在异常，已自动作废。本题不会影响你的学习记录。';
-
-    container.innerHTML='<div class="question-card rounded-2xl bg-white p-6"><p>'+message+'</p><button id="retryQualityBtn" class="mt-4">重新生成 / 继续</button></div>';
+    container.innerHTML='<div class="question-card rounded-2xl bg-white p-6"><p>这道题存在异常，已自动作废。本题不会影响你的学习记录。</p><button id="retryQualityBtn" class="mt-4">重新生成 / 继续</button></div>';
     $('retryQualityBtn').addEventListener('click',()=>{
       session.currentQuestion=null;
       saveState();
@@ -3256,74 +3228,20 @@
     },{once:true});
   }
 
-  /* 判题服务连不上 ≠ 题目有问题。
-     这两件事以前是同一个 trusted:false，界面于是把网络故障也说成
-     「这道题存在异常，已自动作废」：题本身是对的，用户却被告知题有问题，
-     而且这一次作答直接没了、练习卡在原地。
-     现在网络/协议类失败一律保留题目和已经写下的答案，只提示网络问题并允许重试。 */
-  function judgeUnavailable(verdict,userAnswer) {
-    const button = $('submitAnswerBtn');
-    if (button) { button.disabled = false; button.textContent = '重试提交'; }
-
-    // 用户写的答案不能因为一次网络抖动就丢掉。
-    const input = $('answerInput');
-    if (input && userAnswer) input.value = userAnswer;
-
-    toast(
-      verdict?.reason === 'judge_uncertain'
-        ? '判题服务这次没能给出结论，题目本身没有问题。请再提交一次。'
-        : '连不上判题服务（网络问题，不是题目问题）。你的答案已保留，请重试。'
-    );
-  }
-
-  /* 判题失败的三种情况必须分开处理：
-       question_untrusted  题目本身不可信      → 作废这道题，换一题
-       judge_unavailable   判题服务连不上      → 保留题目，让用户重试
-       judge_uncertain     判题返回了但不可用  → 保留题目，让用户重试
-     把它们压成一个 trusted:false，上层就只能一刀切。 */
   async function judgeAnswer(question,userAnswer) {
-    if(!trustedQuestion(question)) {
-      return {correct:null,trusted:false,reason:MathQuality.JUDGE_REASONS.QUESTION_UNTRUSTED};
-    }
-
+    if(!trustedQuestion(question))return {correct:null,trusted:false};
     const decision=MathQuality.compare(userAnswer,question.answer);
-    if(decision!=='uncertain') {
-      return {correct:decision==='equivalent',verdict:decision,trusted:true,method:'deterministic',
-        feedback:decision==='equivalent'?'与参考答案数学等价。':'与参考答案不等价。'};
-    }
-
+    if(decision!=='uncertain')return {correct:decision==='equivalent',verdict:decision,trusted:true,method:'deterministic',feedback:decision==='equivalent'?'与参考答案数学等价。':'与参考答案不等价。'};
     try {
       const result=await apiCall('judge',{question,userAnswer});
-
       if(result.trusted===true && ['equivalent','not_equivalent'].includes(result.verdict)) {
         markApiRequestSuccess();
         return {...result,correct:result.verdict==='equivalent'};
       }
-
-      // 判题员怀疑题目给定的标准答案本身有问题。作废这道题，但这不是学生的错。
-      if(result.verdict==='canonical_suspected') {
-        markApiRequestSuccess();
-        return {correct:null,trusted:false,reason:MathQuality.JUDGE_REASONS.CANONICAL_SUSPECTED,verdict:result.verdict};
-      }
-
-      // 服务端已经区分了「题目不可信」和「判题服务不可用」，照搬它的原因，
-      // 不要在这里重新猜一遍——猜错就会把网络故障说成题目有问题。
-      // 注意必须逐条映射：只认 question_untrusted、其余一律归到 judge_uncertain 的话，
-      // 真正的 judge_unavailable 会被降级，界面于是把「连不上服务」说成「判题没结论」。
-      const SERVER_REASONS = {
-        [MathQuality.JUDGE_REASONS.QUESTION_UNTRUSTED]: MathQuality.JUDGE_REASONS.QUESTION_UNTRUSTED,
-        [MathQuality.JUDGE_REASONS.JUDGE_UNAVAILABLE]: MathQuality.JUDGE_REASONS.JUDGE_UNAVAILABLE,
-        [MathQuality.JUDGE_REASONS.CANONICAL_SUSPECTED]: MathQuality.JUDGE_REASONS.CANONICAL_SUSPECTED
-      };
-
-      const reason =
-        SERVER_REASONS[result.reason] ||
-        MathQuality.JUDGE_REASONS.JUDGE_UNCERTAIN;
-
-      return {correct:null,trusted:false,reason,verdict:result?.verdict};
+      return {correct:null,trusted:false};
     } catch(error) {
       markApiRequestFailure(error);
-      return {correct:null,trusted:false,reason:MathQuality.JUDGE_REASONS.JUDGE_UNAVAILABLE,error};
+      return {correct:null,trusted:false};
     }
   }
 
@@ -3334,88 +3252,283 @@
   =========================================================
   */
 
-  /* Verified Fallback Bank（独立模块 fallback-bank.js，60 道，逐题经确定性引擎自检）。
-     不再内联题目：内联版只有 12 道、选取只看难度、且其中一道答案是错的
-     （ln(1+sin x) 的极限写成 -1/6，正确值是 +1/6）。安全网本身必须安全。 */
-  const FALLBACK_BANK =
-    (typeof FallbackBank !== 'undefined' &&
-      FallbackBank &&
-      Array.isArray(
-        FallbackBank.BANK
-      ))
-      ? FallbackBank.BANK
-      : [];
+  const FALLBACK_BANK = [
+    {
+      module:
+        'limit',
 
+      topic:
+        '重要极限',
 
-  const FALLBACK_SOURCE =
-    (typeof FallbackBank !== 'undefined' &&
-      FallbackBank &&
-      FallbackBank.VERSION) ||
-    'none';
+      difficulty:
+        2,
 
+      instruction:
+        '计算极限',
 
-  if (
-    !FALLBACK_BANK
-      .length
-  ) {
-    console.error(
-      'fallback-bank.js 未加载：备用题池为空，AI 出题失败时将无题可退。'
-    );
-  }
+      expression:
+        '\\lim_{x\\to0}\\frac{\\sin 3x}{x}',
 
+      answer:
+        '3',
 
-  /* 把最近做过的备用题还原成 id 列表，供选题时排除。
-     只在 state.history 里按题面反查，不需要给历史记录加新字段。 */
-  function recentFallbackIds(
-    limit = 20
-  ) {
-    const out = [];
+      solution:
+        '利用 \\(\\sin u\\sim u\\)，所以 \\(\\sin 3x\\sim 3x\\)，极限为 \\(3\\)。'
+    },
 
-    for (const item of state.history.slice(-limit)) {
-      const key =
-        item.expression ||
-        item.prompt ||
-        '';
+    {
+      module:
+        'limit',
 
-      if (!key) continue;
+      topic:
+        '等价无穷小',
 
-      const hit = FALLBACK_BANK.find(
-        q => q.expression === key
-      );
+      difficulty:
+        4,
 
-      if (hit) out.push(hit.id);
+      instruction:
+        '计算极限',
+
+      expression:
+        '\\lim_{x\\to0}\\frac{1-\\cos x}{x^2}',
+
+      answer:
+        '1/2',
+
+      solution:
+        '利用 \\(1-\\cos x=2\\sin^2(x/2)\\)，得到 \\(\\frac12\\)。'
+    },
+
+    {
+      module:
+        'limit',
+
+      topic:
+        '泰勒展开',
+
+      difficulty:
+        6,
+
+      instruction:
+        '计算极限',
+
+      expression:
+        '\\lim_{x\\to0}\\frac{e^x-1-x-\\frac{x^2}{2}}{x^3}',
+
+      answer:
+        '1/6',
+
+      solution:
+        '使用 \\(e^x=1+x+\\frac{x^2}{2}+\\frac{x^3}{6}+o(x^3)\\)。'
+    },
+
+    {
+      module:
+        'limit',
+
+      topic:
+        '复合极限',
+
+      difficulty:
+        8,
+
+      instruction:
+        '计算极限',
+
+      expression:
+        '\\lim_{x\\to0}\\frac{\\ln(1+\\sin x)-x+\\frac{x^2}{2}}{x^3}',
+
+      answer:
+        '-1/6',
+
+      solution:
+        '对 \\(\\sin x\\) 与 \\(\\ln(1+u)\\) 分层展开并保留到三阶。'
+    },
+
+    {
+      module:
+        'derivative',
+
+      topic:
+        '复合函数求导',
+
+      difficulty:
+        2,
+
+      instruction:
+        '求导',
+
+      expression:
+        'y=\\ln(1+x^2)',
+
+      answer:
+        '2x/(1+x^2)',
+
+      solution:
+        '链式法则得到 \\(y\'=\\frac{2x}{1+x^2}\\)。'
+    },
+
+    {
+      module:
+        'derivative',
+
+      topic:
+        '乘积法则',
+
+      difficulty:
+        4,
+
+      instruction:
+        '求导',
+
+      expression:
+        'y=x^2e^x',
+
+      answer:
+        'e^x(x^2+2x)',
+
+      solution:
+        '乘积法则：\\(y\'=2xe^x+x^2e^x=e^x(x^2+2x)\\)。'
+    },
+
+    {
+      module:
+        'derivative',
+
+      topic:
+        '隐函数求导',
+
+      difficulty:
+        6,
+
+      instruction:
+        '已知曲线，求 \\(dy/dx\\)',
+
+      expression:
+        'x^2+xy+y^2=1',
+
+      answer:
+        '-(2x+y)/(x+2y)',
+
+      solution:
+        '两边对 \\(x\\) 求导并整理 \\(y\'\\) 项。'
+    },
+
+    {
+      module:
+        'derivative',
+
+      topic:
+        '高阶导数',
+
+      difficulty:
+        8,
+
+      instruction:
+        '求二阶导数',
+
+      expression:
+        'y=e^x\\sin x',
+
+      answer:
+        '2e^x cos x',
+
+      solution:
+        '先求 \\(y\'=e^x(\\sin x+\\cos x)\\)，再求一次导数。'
+    },
+
+    {
+      module:
+        'integral',
+
+      topic:
+        '基本积分',
+
+      difficulty:
+        2,
+
+      instruction:
+        '计算不定积分',
+
+      expression:
+        '\\int(3x^2+2x)\\,dx',
+
+      answer:
+        'x^3+x^2+C',
+
+      solution:
+        '逐项积分得到 \\(x^3+x^2+C\\)。'
+    },
+
+    {
+      module:
+        'integral',
+
+      topic:
+        '换元积分',
+
+      difficulty:
+        4,
+
+      instruction:
+        '计算不定积分',
+
+      expression:
+        '\\int 2x\\cos(x^2)\\,dx',
+
+      answer:
+        'sin(x^2)+C',
+
+      solution:
+        '令 \\(u=x^2\\)，则 \\(du=2x\\,dx\\)。'
+    },
+
+    {
+      module:
+        'integral',
+
+      topic:
+        '分部积分',
+
+      difficulty:
+        6,
+
+      instruction:
+        '计算不定积分',
+
+      expression:
+        '\\int x^2e^x\\,dx',
+
+      answer:
+        'e^x(x^2-2x+2)+C',
+
+      solution:
+        '连续两次分部积分即可。'
+    },
+
+    {
+      module:
+        'integral',
+
+      topic:
+        '定积分技巧',
+
+      difficulty:
+        8,
+
+      instruction:
+        '计算定积分',
+
+      expression:
+        '\\int_0^1\\frac{\\ln(1+x)}{1+x}\\,dx',
+
+      answer:
+        '(ln2)^2/2',
+
+      solution:
+        '令 \\(u=\\ln(1+x)\\)，积分化为 \\(\\int_0^{\\ln2}u\\,du\\)。'
     }
-
-    return out;
-  }
-
-
-  /* 降级路径：模块内按难度最接近挑一道。
-     只有在 FallbackBank.pick 不可用时才会走到这里。 */
-  function closestFallback(
-    module,
-    target
-  ) {
-    const pool =
-      FALLBACK_BANK.filter(
-        q => q.module === module
-      );
-
-    const list =
-      pool.length
-        ? pool
-        : FALLBACK_BANK;
-
-    if (!list.length) return null;
-
-    return list
-      .slice()
-      .sort(
-        (a, b) =>
-          Math.abs(a.difficulty - target) -
-          Math.abs(b.difficulty - target)
-      )[0];
-  }
+  ];
 
 
   function fallbackQuestion(
@@ -3432,30 +3545,32 @@
       ) || 6;
 
 
-    const picked =
-      (typeof FallbackBank !== 'undefined' &&
-        FallbackBank &&
-        typeof FallbackBank.pick === 'function')
-        ? FallbackBank.pick({
-            module,
-            targetDifficulty: target,
-            topic: plan.topic || null,
-            recentIds: recentFallbackIds()
-          })
-        : null;
+    const candidates =
+      FALLBACK_BANK
+        .filter(
+          q =>
+            q.module ===
+            module
+        )
+        .sort(
+          (
+            a,
+            b
+          ) =>
+            Math.abs(
+              a.difficulty -
+              target
+            ) -
+            Math.abs(
+              b.difficulty -
+              target
+            )
+        );
+
 
     const base =
-      picked ||
-      closestFallback(module, target);
-
-
-    if (!base) {
-      /* 备用题池为空是不可恢复的：宁可显式报错，也不要静默返回 undefined
-         让上层拿到一道空题。 */
-      throw new Error(
-        'fallback bank unavailable (fallback-bank.js 未加载)'
-      );
-    }
+      candidates[0] ||
+      FALLBACK_BANK[0];
 
 
     const provisionalDifficulty =
@@ -3474,9 +3589,6 @@
 
       source:
         'fallback',
-
-      bankId:
-        base.id,
 
       requestedDifficulty:
         target,
@@ -3909,26 +4021,10 @@
             ? q.module
             : plan.module,
 
-        // ── canonical 字段：必须与服务端生成时一字不差 ──
-        // 以前这里兜底成 plan.topic || '综合基础'，而 verification.content 快照
-        // 算的是模型返回的原始 topic；两者一旦不等，整道题就会被判成「不可信」
-        // 并显示「这道题存在异常」。canonical 一律不做兜底改写。
         topic:
           q.topic ||
-          '',
-
-        // ── display 字段：审核员认为考点/难度不贴切时的修正，只影响展示 ──
-        // 它们不参与 content() 快照，所以改它们不会让题目失效。
-        displayTopic:
-          q.displayTopic ||
-          null,
-
-        displayDifficulty:
-          Number(q.displayDifficulty) || null,
-
-        metadataCorrection:
-          q.metadataCorrection ||
-          null,
+          plan.topic ||
+          '综合基础',
 
         instruction:
           q.instruction ||
@@ -4973,89 +5069,6 @@
   }
 
 
-  /* 一道题和它的 verification 快照是不可分割的一对。
-     快照是按 canonical 字段算出来的，字段一改，快照立刻失效。
-
-     旧的更新分支把 instruction/expression/prompt/answer/solution 逐个覆盖过去，
-     快照却留在创建时那道题上（同一考点第二次做错时会走到这里）。
-     结果是存下来的复习条目自相矛盾：它持有一份描述**另一道题**的验证快照。
-
-     目前复习会话不是把条目当题目渲染，而是拿它的题面当 referenceQuestion
-     重新生成一道题，所以这条不一致还没变成可见故障。但它是持久化数据在说谎，
-     会被同步到云端，而且只要将来有代码按 trustedQuestion 校验条目，就会立刻
-     变成「这道题存在异常」。顺带一提，旧写法还给空 topic 补了「综合基础」——
-     那等于往 canonical 字段里写一个题目本身没有的考点。
-
-     所以这里只提供整体替换，不提供"顺手改一个字段"的入口。 */
-  const CANONICAL_FIELDS = [
-    'module',
-    'topic',
-    'instruction',
-    'expression',
-    'prompt',
-    'answer',
-    'solution'
-  ];
-
-
-  function bindReviewQuestion(
-    item,
-    question
-  ) {
-    for (
-      const field of CANONICAL_FIELDS
-    ) {
-      // 逐字段对齐 MathQuality.content() 的取值方式，不多不少。
-      // 这里一律不做兜底改写：兜底是显示层的事，写进 canonical 字段
-      // 就等于把快照和数据改成两回事。
-      item[field] =
-        field ===
-        'answer'
-          ? String(
-              question
-                .answer ??
-              ''
-            )
-          : question[field] ||
-            '';
-    }
-
-
-    item.question_id =
-      question.question_id ||
-      question.id ||
-      null;
-
-    item.model =
-      question.model ||
-      null;
-
-    item.generator_prompt_version =
-      question
-        .generator_prompt_version ||
-      null;
-
-    item.review_prompt_version =
-      question
-        .review_prompt_version ||
-      null;
-
-    item.verification =
-      question.verification ||
-      null;
-
-    // 备用题的"可信"来自题库而不是来自快照，所以来源标记要一起搬过来，
-    // 否则复习时会因为缺 verification 被判成不可信。
-    item.source =
-      question.source ||
-      null;
-
-    item.bankId =
-      question.bankId ||
-      null;
-  }
-
-
   function queueWrongQuestion(
     question
   ) {
@@ -5079,12 +5092,42 @@
 
     if (!item) {
       item = {
+        question_id:question.question_id || question.id, model:question.model,
+        generator_prompt_version:question.generator_prompt_version, review_prompt_version:question.review_prompt_version,
+        verification:question.verification,
         id:
           uid(
             'review'
           ),
 
         key,
+
+        module:
+          question.module,
+
+        topic:
+          question.topic ||
+          '综合基础',
+
+        instruction:
+          question
+            .instruction ||
+          '',
+
+        expression:
+          question
+            .expression ||
+          '',
+
+        prompt:
+          question.prompt ||
+          '',
+
+        answer:
+          question.answer,
+
+        solution:
+          question.solution,
 
         provisionalDifficulty:
           question
@@ -5123,13 +5166,6 @@
           new Date()
             .toISOString()
       };
-
-
-      // 题目内容与 verification 快照成对写入（见 bindReviewQuestion）。
-      bindReviewQuestion(
-        item,
-        question
-      );
 
 
       state.reviews.push(
@@ -5179,12 +5215,31 @@
         .toISOString();
 
 
-    // 刷新成最近这道错题。canonical 字段与 verification 快照必须整体替换 ——
-    // 只换字段不换快照，存下来的条目就会持有一份描述另一道题的验证快照。
-    bindReviewQuestion(
-      item,
+    item.instruction =
       question
-    );
+        .instruction ||
+      item.instruction;
+
+
+    item.expression =
+      question
+        .expression ||
+      item.expression;
+
+
+    item.prompt =
+      question.prompt ||
+      item.prompt;
+
+
+    item.answer =
+      question.answer ||
+      item.answer;
+
+
+    item.solution =
+      question.solution ||
+      item.solution;
 
 
     item.provisionalDifficulty =
@@ -7184,22 +7239,8 @@
   function questionDifficultyLabel(
     question
   ) {
-    // 展示用难度：审核员明确说「与计划的难度不相称，应该是 N」时的修正值，
-    // 是针对这一道题的具体修正，优先级最高。
-    //
-    // 它必须排在 calibratedDifficulty 之前 —— 因为 calibratedDifficulty 是
-    // 生成时用 calibrateDifficulty(provisionalDifficulty) 算出来的，
-    // 在没有足够标定点时原样返回 provisionalDifficulty（见 calibrateDifficulty）。
-    // 也就是说它是同一个 AI 猜测的单调变换，并不比 provisionalDifficulty 更权威。
-    // 把全局变换排在针对本题的修正之前，是把信息量搞反了。
-    //
-    // 注意：这里只改展示。学习模型仍走 calibratedDifficulty 那条链——
-    // displayDifficulty 不参与 content() 快照，也不参与 correctProbability，
-    // 所以改它既不会让题目失效，也不会悄悄改动自适应难度。
     const b =
       Number(
-        question
-          .displayDifficulty ??
         question
           .calibratedDifficulty ??
         question
@@ -7346,7 +7387,6 @@
                 text-muted
               ">
                 ${escapeHTML(
-                  q.displayTopic ||
                   q.topic ||
                   '综合基础'
                 )}
@@ -7635,16 +7675,8 @@
 
 
     if (state.activeSession !== session || session.currentQuestion !== q) return;
-
     if (verdict.trusted !== true || !trustedQuestion(q)) {
-      // 处置方式由引擎统一决定：只有「题目本身不可信」才作废，
-      // 网络/超时/协议类失败一律保留题目和用户答案。见 MathQuality.judgeOutcome。
-      const outcome = MathQuality.judgeOutcome(verdict);
-      if (outcome.action === 'void_question') {
-        voidQuestion(session,q,containerId,userAnswer,verdict);
-      } else {
-        judgeUnavailable(verdict, userAnswer);
-      }
+      voidQuestion(session,q,containerId,userAnswer,verdict);
       return;
     }
 
