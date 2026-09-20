@@ -23,7 +23,7 @@
   ck('没有把它降级成「没能给出结论」', !toasts.some(t => t.includes('没能给出结论')), JSON.stringify(toasts));
 
   ck('题目没有被作废', !q || q.status !== 'void', q && q.status);
-  ck('输入框里保留了答案', input && input.value === 'sin(x)', input && JSON.stringify(input.value));
+  ck('输入框里保留了答案', input && input.value === 'sinx', input && JSON.stringify(input.value));
   ck('按钮仍提示可以重试', button && button.textContent.trim() === '重试提交', button && button.textContent.trim());
   ck('没有写入作答记录', s && s.results.length === 0, s && s.results.length);
   ck('无运行时错误', window.__errors.length === 0, window.__errors.join(' | '));

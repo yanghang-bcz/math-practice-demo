@@ -20,8 +20,12 @@
   ck('卡片上显示的是修正后的考点', text.includes('洛必达法则'), text.slice(0, 120));
   ck('卡片上没有出现原始考点', !text.includes('重要极限'), text.slice(0, 120));
 
-  ck('展示层难度生效（对象）', q && q.displayDifficulty === 8, q && q.displayDifficulty);
-  ck('难度徽章显示修正后的值 8.0', badge && badge.textContent.trim() === '难度 8.0',
+  ck('展示层难度仍被记录在题目上（不丢数据）', q && q.displayDifficulty === 8, q && q.displayDifficulty);
+  /* Task #4 起审核员的 suggested_difficulty 不再参与界面：线上 50 题评测量出
+     这条链路跑偏得很厉害（计划 L12 的题显示成 L3/L4），所以难度徽章回到
+     生成时的难度估计（6.0），displayDifficulty 只留档、不显示。 */
+  ck('难度徽章不采用展示层难度，回到生成时的估计 6.0',
+    badge && badge.textContent.trim() === '难度 6.0',
     badge ? badge.textContent.trim() : 'no badge');
 
   // ── 修正不得把题目弄失效 ──

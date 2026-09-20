@@ -61,47 +61,128 @@
     return q;
   }
 
-  window.__mock = { judge: null, judgeStatus: 200, generateStatus: 200, calls: [], judgeBodies: [], generated: 0, nextIndex: null };
+  // 客户端流水线版本（app.js clientPipeline() 的定义，必须一致，否则每次响应
+  // 都会被 Task 5I 的逐次版本校验拦下来）
+  function goodVersions() {
+    return { protocol: 2, generator: 'generator-v2', reviewer: 'reviewer-v2', judge: 'judge-v2', math_engine: MathQuality.VERSION };
+  }
+
+  window.__mock = {
+    // 判题桩：null 表示「没有桩」，走真实的服务端返回结构
+    judge: null,
+    judgeStatus: 200,
+    // 前 N 次 judge 请求返回 503（用于验证客户端自动重试）
+    judgeFailures: 0,
+    generateStatus: 200,
+    // 前 N 次 generate 请求返回 503（用于验证自动重试 / 耗尽后回落备用题）
+    generateFailures: 0,
+    // 挂起下一次 generate：请求会一直 pending，直到场景调用 __mock.release()
+    holdGenerate: false,
+    _release: null,
+    // true 时 fetch 直接抛 TypeError，模拟断网
+    offline: false,
+    // 覆盖 health 与各响应里的版本（用于 5I 版本不匹配场景）
+    versions: null,
+    // 记录
+    calls: [],
+    judgeBodies: [],
+    generateBodies: [],
+    generateResponses: [],
+    judgeResponses: [],
+    healthResponses: [],
+    generated: 0,
+    nextIndex: null
+  };
+
+  window.__mock.release = function () {
+    const fn = window.__mock._release;
+    window.__mock._release = null;
+    if (fn) fn();
+  };
+
+  function json(obj, status) {
+    return new Response(JSON.stringify(obj), { status: status || 200, headers: { 'Content-Type': 'application/json' } });
+  }
 
   window.fetch = async function (url, options) {
     const u = String(url);
-    if (u.includes('health=1')) {
-      return new Response(JSON.stringify({ ok: true, service: 'deepseek', protocol_version: 2,
-        pipeline: { protocol: 2, generator: 'generator-v2', reviewer: 'reviewer-v2', judge: 'judge-v2', math_engine: MathQuality.VERSION } }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+    if (window.__mock.offline) {
+      // 浏览器真实断网时 fetch 抛的是 TypeError（"Failed to fetch"）
+      const error = new TypeError('Failed to fetch');
+      window.__mock.calls.push('offline!');
+      throw error;
     }
+
+    if (u.includes('health=1')) {
+      const versions = window.__mock.versions || goodVersions();
+      window.__mock.healthResponses.push(versions);
+      return json({ ok: true, service: 'deepseek', protocol_version: 2, pipeline: versions });
+    }
+
     const body = options && options.body ? JSON.parse(options.body) : {};
     window.__mock.calls.push(body.action);
     if (body.action === 'judge') window.__mock.judgeBodies.push(body);
+    if (body.action === 'generate') window.__mock.generateBodies.push(body);
+
+    // 服务端会把 request_id / session_id / question_sequence 原样回显（Task 5E/5F/5I）。
+    // 不回显的话，客户端那三条校验永远走不到，等于在浏览器里测了个假的协议。
+    const echo = {
+      request_id: body.request_id ?? null,
+      session_id: body.session_id ?? null,
+      question_sequence: body.question_sequence ?? null,
+      versions: window.__mock.versions || goodVersions()
+    };
 
     if (body.action === 'generate') {
-      if (window.__mock.generateStatus !== 200) {
-        return new Response(JSON.stringify({ error: '生成失败', code: 'UPSTREAM_REJECTED' }),
-          { status: window.__mock.generateStatus, headers: { 'Content-Type': 'application/json' } });
+      if (window.__mock.holdGenerate) {
+        window.__mock.holdGenerate = false;
+        await new Promise(resolve => { window.__mock._release = resolve; });
       }
+
+      if (window.__mock.generateFailures > 0) {
+        window.__mock.generateFailures -= 1;
+        window.__mock.generateResponses.push(503);
+        return json({ error: '生成服务暂时不可用', code: 'UPSTREAM_REJECTED' }, 503);
+      }
+
+      if (window.__mock.generateStatus !== 200) {
+        window.__mock.generateResponses.push(window.__mock.generateStatus);
+        return json({ error: '生成失败', code: 'UPSTREAM_REJECTED' }, window.__mock.generateStatus);
+      }
+
       // nextIndex 非空时强制出某一道：轮转计数会被预热预取吃掉，
       // 场景需要"下一题必须是另一道同考点的题"时就得显式指定。
       const index = window.__mock.nextIndex !== null ? window.__mock.nextIndex : window.__mock.generated++;
       const q = buildQuestion(index);
-      return new Response(JSON.stringify({ questions: [q], attempts: 1,
-        versions: { protocol: 2, generator: 'generator-v2', reviewer: 'reviewer-v2', judge: 'judge-v2', math_engine: MathQuality.VERSION } }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } });
+      window.__mock.generateResponses.push(200);
+      return json({ questions: [q], attempts: 1, ...echo });
     }
 
     if (body.action === 'judge') {
-      if (window.__mock.judgeStatus !== 200) {
-        return new Response(JSON.stringify({ error: '判题服务暂时不可用', reason: 'judge_unavailable' }),
-          { status: window.__mock.judgeStatus, headers: { 'Content-Type': 'application/json' } });
+      if (window.__mock.judgeFailures > 0) {
+        window.__mock.judgeFailures -= 1;
+        window.__mock.judgeResponses.push(503);
+        return json({ error: '判题服务暂时不可用', reason: 'judge_unavailable' }, 503);
       }
-      return new Response(JSON.stringify(window.__mock.judge), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+      if (window.__mock.judgeStatus !== 200) {
+        window.__mock.judgeResponses.push(window.__mock.judgeStatus);
+        return json({ error: '判题服务暂时不可用', reason: 'judge_unavailable' }, window.__mock.judgeStatus);
+      }
+
+      window.__mock.judgeResponses.push(200);
+      return json({ ...(window.__mock.judge || {}), ...echo });
     }
 
     if (body.action === 'evaluate') {
-      return new Response(JSON.stringify({ difficulty: 6, confidence: 0.4 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return json({ difficulty: 6, confidence: 0.4, ...echo });
     }
 
-    return new Response(JSON.stringify({ error: 'unexpected action ' + body.action }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    return json({ error: 'unexpected action ' + body.action }, 400);
   };
+
+  // 回显用的 request_id：客户端发的那个（body.request_id）
 
   return 'mock installed: MathQuality=' + MathQuality.VERSION + ' gate=' + MathQuality.approved(buildQuestion());
 })()

@@ -3,6 +3,30 @@
 
   const LOCAL_STATE_KEY = 'calcDaily.v2';
 
+  /* =========================================================
+     云同步的失败模型（Task 5J）
+     =========================================================
+
+     旧的同步只有一个 syncTail 串行链：每次操作 `await` 云 SDK 的返回值，
+     没有超时、没有重试、也没有在失败后把状态放回队列。三件事都会真的出事：
+
+       1. 一次请求卡住（弱网、被中间设备吞掉、SDK 内部重试），syncTail 就
+          永远不释放 —— 此后所有同步都排在它后面，表现是「学习记录再也没
+          同步上去」，而界面上什么都看不到；
+       2. 一次瞬时抖动（DNS、502）就丢掉这一轮，要等用户下次操作才再试；
+       3. 断网期间的操作没人管，恢复联网后也不会自动补上。
+
+     这一版给每次云操作加上「超时 + 瞬时错误重试 + 退避」，并且无论成败都在
+     finally 里释放队列；失败的状态会**放回队列**并按退避重试，
+     联网恢复时立即冲刷。
+     ========================================================= */
+
+  const SYNC_TIMEOUT_MS = 12000;
+  const SYNC_ATTEMPTS = 2;
+  const SYNC_BACKOFF_MS = 700;
+  const RETRY_MIN_MS = 5000;
+  const RETRY_MAX_MS = 60000;
+
   let currentUser = null;
   let syncTimer = null;
   let syncTail = Promise.resolve();
@@ -13,6 +37,19 @@
   let lastSyncAt = null;
   let lastError = null;
   let lastQueuedState = null;
+  let retryTimer = null;
+  let retryDelayMs = RETRY_MIN_MS;
+
+  const syncStats = {
+    attempts: 0,
+    retries: 0,
+    timeouts: 0,
+    failures: 0,
+    recoveries: 0,
+    lastFailureAt: null,
+    lastFailureReason: null,
+    lastFailureKind: null
+  };
 
   const syncedAttemptIds = new Set();
 
@@ -48,10 +85,97 @@
     );
   }
 
+  /* ── 超时 / 重试 / 退避 ──────────────────────────────────── */
+
+  function sleepMs(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function isOnline() {
+    const flag = window.navigator?.onLine;
+    return flag === undefined ? true : Boolean(flag);
+  }
+
+  /* 超时不是「同步失败」的一种口味，而是「这次结果不可知」：
+     请求可能其实成功了。三个 upsert 都是幂等的，所以重试是安全的；
+     但绝不能因为一次超时就把这次学习记录丢掉。 */
+  function withTimeout(promise, label, ms = SYNC_TIMEOUT_MS) {
+    let timer = null;
+
+    const guard = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error(`${label} 超时（${ms}ms 未返回）`);
+        error.code = 'SYNC_TIMEOUT';
+        reject(error);
+      }, ms);
+    });
+
+    return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+  }
+
+  /* 只有「再试一次可能成功」的错误才重试。SDK 把错误都压成 message，
+     所以按关键词判断；同时把超时与当前断网状态视为可重试 ——
+     这两种情况占线上同步失败的大多数。 */
+  function isTransient(error) {
+    if (!error) return false;
+    if (error.code === 'SYNC_TIMEOUT') return true;
+    if (!isOnline()) return true;
+
+    return /timeout|timed out|超时|network|fetch|networkerror|econn|socket|epipe|502|503|504|429|rate limit|too many|temporar/i
+      .test(String(error.message || error));
+  }
+
+  function failureKind(error) {
+    if (error?.code === 'SYNC_TIMEOUT') return 'sync_timeout';
+    return isOnline() ? 'sync_error' : 'sync_offline';
+  }
+
+  async function withRetry(task, label) {
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= SYNC_ATTEMPTS; attempt++) {
+      syncStats.attempts++;
+
+      try {
+        return await withTimeout(task(), label);
+
+      } catch (error) {
+        lastError = error;
+
+        if (attempt >= SYNC_ATTEMPTS || !isTransient(error)) break;
+
+        syncStats.retries++;
+        await sleepMs(SYNC_BACKOFF_MS * attempt);
+      }
+    }
+
+    throw lastError;
+  }
+
+  /* 失败之后按退避重排。退避是指数的，但**不无限增长**也不无休止重试：
+     到上限（60s）就按 60s 一次慢慢试，直到联网事件或下一次操作把它冲刷掉。 */
+  function scheduleRetry() {
+    if (!configured() || !currentUser || resetting) return;
+    if (retryTimer) return;
+
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      retryDelayMs = Math.min(retryDelayMs * 2, RETRY_MAX_MS);
+      flushPending();
+    }, retryDelayMs);
+  }
+
+  function clearRetry() {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+    retryDelayMs = RETRY_MIN_MS;
+  }
+
   function setUser(user) {
     if ((currentUser?.id || null) !== (user?.id || null)) {
       userGeneration++;
       clearTimeout(syncTimer);
+      clearRetry();
       lastQueuedState = null;
       pendingState = null;
       syncedAttemptIds.clear();
@@ -276,11 +400,14 @@
   async function loadCloudSnapshot(userId) {
     if (!configured() || !userId) return null;
 
-    const result = await client()
-      .from('user_state')
-      .select('state_json, updated_at')
-      .eq('user_id', userId)
-      .maybeSingle();
+    const result = await withTimeout(
+      client()
+        .from('user_state')
+        .select('state_json, updated_at')
+        .eq('user_id', userId)
+        .maybeSingle(),
+      '读取云端学习状态'
+    );
 
     if (result.error) {
       throw new Error(
@@ -573,26 +700,72 @@
       assertUser(user.id, generation);
       lastError = null;
       emitStatus('syncing', '正在同步学习记录…');
+
+      /* 三个 upsert 都是幂等的（onConflict 指定了主键），所以这里整体重试
+         是安全的：超时之后我们并不知道服务端到底写没写成功，
+         幂等重试是唯一能把这件事做对的方式。 */
+      const push = task => withRetry(task, '同步学习记录');
+
+      let succeeded = false;
+      let transient = false;
+
       try {
         const now = isoNow();
-        await upsertProfile(user, now);
-        assertUser(user.id, generation);
-        await upsertCoreState(snapshot, now, user.id);
-        assertUser(user.id, generation);
-        await upsertAttempts(snapshot, Boolean(options.full), user.id, generation);
-        assertUser(user.id, generation);
+
+        await push(async () => {
+          await upsertProfile(user, now);
+          assertUser(user.id, generation);
+          await upsertCoreState(snapshot, now, user.id);
+          assertUser(user.id, generation);
+          await upsertAttempts(snapshot, Boolean(options.full), user.id, generation);
+          assertUser(user.id, generation);
+        });
+
         lastSyncAt = now;
         lastError = null;
+        clearRetry();
+        syncStats.recoveries++;
+        succeeded = true;
         emitStatus('synced', '云端已同步');
         return true;
+
       } catch (error) {
+        transient = isTransient(error);
+
         if (generation === userGeneration) {
-          lastError = error.message || String(error);
-          emitStatus('error', lastError);
+          recordFailure(error);
+          error.syncRecorded = true;
+
+          /* 失败的状态必须放回队列。旧写法在这里什么都不做 ——
+             这一次的记录要等到用户下一次操作才会再被同步，
+             而「下一次操作」可能很久以后，甚至不会来（用户关掉页面）。 */
+          if (!lastQueuedState) {
+            lastQueuedState = clone(snapshot);
+          }
         }
+
         throw error;
+
+      } finally {
+        /* finally 里释放队列：无论成功、失败还是超时，syncTail 都必须能往前走。
+           旧写法在超时（永不 settle）时会让整条链卡死 —— 那才是最难查的一种：
+           界面没有任何报错，只是从此再也不同步。
+
+           队列里还有一份新状态时，成功就按正常的防抖节奏补发；
+           失败则按退避重排（永久性错误不重排，试再多次也是同一个结果）。 */
+        if (generation === userGeneration && lastQueuedState && !syncTimer && !retryTimer) {
+          if (succeeded) {
+            syncTimer = setTimeout(() => {
+              syncTimer = null;
+              flushPending();
+            }, 900);
+          } else if (transient) {
+            scheduleRetry();
+          }
+        }
       }
     });
+
     syncTail = operation.catch(() => {});
     return operation;
   }
@@ -606,14 +779,51 @@
 
     clearTimeout(syncTimer);
 
-    syncTimer = setTimeout(() => {
-      const next = lastQueuedState;
-      lastQueuedState = null;
+    /* 断网时不发这一次请求：它只会以一次超时收场，还要占住整条串行链。
+       状态已经进队列了，等 online 事件或退避计时器把它冲刷出去。 */
+    if (!isOnline()) {
+      emitStatus('offline', '当前离线，学习记录将在联网后自动同步。');
+      return;
+    }
 
-      if (next) {
-        syncNow(next).catch(() => {});
-      }
+    syncTimer = setTimeout(() => {
+      flushPending();
     }, 900);
+  }
+
+  /* 把队列里那一份冲刷出去。联网恢复、退避计时器、页面重新可见都会调它。 */
+  function flushPending() {
+    if (!lastQueuedState || !configured() || !currentUser || resetting) {
+      return Promise.resolve(false);
+    }
+
+    clearTimeout(syncTimer);
+    clearTimeout(retryTimer);
+    retryTimer = null;
+
+    const next = lastQueuedState;
+    lastQueuedState = null;
+
+    return syncNow(next).catch(() => false);
+  }
+
+  /* 记录一次失败：状态、计数、分类都写全。
+     登录后的首次读取也会走到这里 —— 那一步失败如果只把异常抛给调用方，
+     界面上就只剩「正在读取云端学习记录…」永远停在那里。 */
+  function recordFailure(error) {
+    const reason = error?.message || String(error);
+
+    syncStats.failures++;
+    syncStats.lastFailureAt = isoNow();
+    syncStats.lastFailureReason = reason;
+    syncStats.lastFailureKind = failureKind(error);
+
+    if (error?.code === 'SYNC_TIMEOUT') syncStats.timeouts++;
+
+    lastError = reason;
+    emitStatus(isOnline() ? 'error' : 'offline', reason);
+
+    return reason;
   }
 
   async function resolveAfterSignIn(localState) {
@@ -621,6 +831,25 @@
       return localState;
     }
 
+    try {
+      return await resolveAfterSignInInner(localState);
+
+    } catch (error) {
+      if (error?.message === '账号状态已改变，本次同步已取消。') {
+        throw error;
+      }
+
+      /* syncNow 内部已经记过一次（它更清楚是哪一步失败），
+         这里只兜住「还没记过」的那几类：读云端快照、合并、账号校验。 */
+      if (currentUser && !error?.syncRecorded) {
+        recordFailure(error);
+      }
+
+      throw error;
+    }
+  }
+
+  async function resolveAfterSignInInner(localState) {
     const userId = currentUser.id;
     const generation = userGeneration;
     emitStatus('loading', '正在读取云端学习记录…');
@@ -693,6 +922,7 @@
     userGeneration++;
     const generation = userGeneration;
     clearTimeout(syncTimer);
+    clearRetry();
     lastQueuedState = null;
     pendingState = null;
     // 等待已经发出的请求结束，再删除，避免旧进度在清空后重新写回。
@@ -715,10 +945,17 @@
 
       for (const table of tables) {
         assertUser(userId, generation);
-        const result = await client()
-          .from(table)
-          .delete()
-          .eq('user_id', userId);
+
+        /* 清空是一串删除。任何一张表卡住，整次清空就永远不返回 ——
+           而调用方在等它，界面停在「正在清空」。超时后按瞬时错误重试一次，
+           仍然失败就明确抛出去：清空这种破坏性操作宁可报错，也不能假装完成。 */
+        const result = await withRetry(async () => {
+          assertUser(userId, generation);
+          return client()
+            .from(table)
+            .delete()
+            .eq('user_id', userId);
+        }, `清空 ${table}`);
 
         if (result.error) {
           lastError = result.error.message;
@@ -740,16 +977,47 @@
     } finally { resetting = false; }
   }
 
+  /* 联网恢复时立即冲刷。断网期间的作答全部躺在队列里，
+     等退避计时器（最多 60s）才补上，用户会觉得「记录丢了」。 */
+  window.addEventListener('online', () => {
+    clearRetry();
+    if (lastQueuedState) {
+      emitStatus('syncing', '网络已恢复，正在补同步学习记录…');
+      flushPending();
+    }
+  });
+
+  /* 从后台切回来时也补一次：移动端标签页被冻结期间
+     setTimeout 不一定会按时触发，退避计时器可能根本没跑。 */
+  window.document?.addEventListener?.('visibilitychange', () => {
+    if (window.document.visibilityState === 'visible' && lastQueuedState) {
+      flushPending();
+    }
+  });
+
   window.CalcDailyCloud = {
     configured,
     setUser,
     getUser,
     queueSync,
+    flushPending,
     syncNow,
     resolveAfterSignIn,
     consumePendingState,
     resetRemote,
-    mergeSnapshots
+    mergeSnapshots,
+    isOnline,
+
+    /* 供本地验收脚本与故障排查读取，不参与业务逻辑。 */
+    getSyncState: () => ({
+      pending: Boolean(lastQueuedState),
+      retryDelayMs,
+      retryScheduled: Boolean(retryTimer),
+      lastSyncAt,
+      lastError,
+      online: isOnline(),
+      stats: { ...syncStats }
+    })
   };
 })();
 

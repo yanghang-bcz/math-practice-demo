@@ -189,6 +189,12 @@
   let apiLastError =
     null;
 
+  /* 协议兼容性（Task 5I）。null = 还没测过；测过之后是一份带 reason 的结论。
+     注意「还没测过」和「测过且不匹配」是两回事：前者照常请求（请求里会带回
+     版本，逐次校验），后者才走短路径直接退到备用题库。 */
+  let apiProtocol =
+    null;
+
 
   /*
   =========================================================
@@ -204,8 +210,376 @@
     diagnosis: null
   };
 
+
+  /* ── 请求身份（Task 5E）────────────────────────────────────────
+
+     预取的整个模型是「提前把下一题生成好」。它天然有三个时间差：
+
+       1. 同一次点击可能触发两轮预取（作答后预取一次、切题时再预取一次），
+          两轮都以同一个 question_sequence 为键；
+       2. 模型返回要 10~40 秒，这中间用户可能已经交了卷、换了模块、结束了这一组题；
+       3. 失效的响应落地时，只能被丢弃 —— 不能覆盖更新的，也不能套到另一道题上。
+
+     所以每次预取都带一份身份：request_id（这一次请求）/ session_id（哪一组题）/
+     question_sequence（这一组的第几题）。取用时**在 await 前后各核对一次**，
+     任何一条对不上就按 STALE_RESPONSE 丢弃并重新生成，绝不将就。
+     ========================================================= */
+
+  let requestCounter = 0;
+
+  let prefetchIssued = 0;
+
+  function nextRequestId(
+    prefix = 'req'
+  ) {
+    requestCounter += 1;
+
+    return `${prefix}-${Date.now().toString(36)}-${requestCounter.toString(36)}`;
+  }
+
+
+  /* 新的预取请求能不能顶掉旧的：
+     题号更靠后的一定更新（用户已经往前走了）；
+     题号相同时，后发出的那个更新（issued 单调递增）。
+     反过来 —— 旧请求想覆盖新请求，一律拒绝。 */
+  function prefetchSupersedes(
+    next,
+    previous
+  ) {
+    if (!previous) {
+      return true;
+    }
+
+    if (
+      next.question_sequence >
+      previous.question_sequence
+    ) {
+      return true;
+    }
+
+    if (
+      next.question_sequence <
+      previous.question_sequence
+    ) {
+      return false;
+    }
+
+    return (
+      next.issued >
+      previous.issued
+    );
+  }
+
+
+  function discardPrefetch(
+    entry,
+    reason
+  ) {
+    diagLog({
+      level: 'info',
+      action: 'prefetch',
+      event: 'stale_response_discarded',
+      kind: FAILURE_KINDS.STALE_RESPONSE,
+      message: reason,
+      request_id: entry?.request_id ?? null,
+      session_id: entry?.session_id ?? null,
+      question_sequence: entry?.question_sequence ?? null,
+      outcome: 'discarded'
+    });
+
+    return null;
+  }
+
   const difficultyEvaluationTasks =
     new Map();
+
+
+  /*
+  =========================================================
+  Diagnostics —— 失败日志与可观测性（Task 5H）
+  =========================================================
+
+  可靠性改造最难验收的一点是「出问题时能说清楚是哪一类失败」。
+  以前只有一句 console.warn(error)，于是「AI 出题失败」「题目不可信」
+  「判题服务连不上」在日志里长得一模一样 —— 事后只能靠猜。
+
+  这里按两层记录：
+
+    每次尝试（per-attempt）   request_id / attempt_id / session_id /
+                            question_sequence / 第几次重试 / 耗时 / HTTP 状态
+    每道题（per-question）    question_id / module / tier / verification_state /
+                            source / 引擎版本 / 最终归宿（生成 or 备用题）
+
+  失败种类用固定的分类表（FAILURE_KINDS），不接受自由文本。
+  只存在内存里、有上限，不上报、不写云 —— 这是排障用的，不是埋点。
+  window.CalcDailyDiag 供本地验收脚本读取。
+  =========================================================
+  */
+
+  const DIAG_LIMIT = 200;
+
+  const diagRecords = [];
+
+  const FAILURE_KINDS = {
+    GENERATE_TIMEOUT: 'generate_timeout',
+    GENERATE_NETWORK: 'generate_network',
+    GENERATE_HTTP: 'generate_http_error',
+    GENERATE_PROTOCOL: 'generate_protocol_error',
+    GENERATE_REJECTED: 'generate_rejected',
+    GENERATE_UNVERIFIED: 'generate_unverified',
+    GENERATE_EMPTY: 'generate_empty',
+    JUDGE_TIMEOUT: 'judge_timeout',
+    JUDGE_NETWORK: 'judge_network',
+    JUDGE_HTTP: 'judge_http_error',
+    JUDGE_PROTOCOL: 'judge_protocol_error',
+    JUDGE_UNCERTAIN: 'judge_uncertain',
+    PROTOCOL_MISMATCH: 'protocol_mismatch',
+    STALE_RESPONSE: 'stale_response',
+    FALLBACK_USED: 'fallback_used',
+    CANONICAL_MUTATED: 'canonical_mutated',
+    SYNC_FAILED: 'sync_failed'
+  };
+
+
+  /* 单条日志。字段一律显式给全（缺的写 null），不要只在「有值的时候」才出现 ——
+     日志字段时有时无，聚合脚本就没法写。 */
+  function diagLog(
+    record
+  ) {
+    if (!record || typeof record !== 'object') {
+      return null;
+    }
+
+    const entry = {
+      at:
+        new Date().toISOString(),
+
+      level:
+        record.level || 'info',
+
+      action:
+        record.action || null,
+
+      event:
+        record.event || null,
+
+      kind:
+        record.kind || null,
+
+      message:
+        record.message || null,
+
+      // ── 每题 ──
+      question_id:
+        record.question_id ?? null,
+
+      module:
+        record.module ?? null,
+
+      tier:
+        record.tier ?? null,
+
+      verification_state:
+        record.verification_state ?? null,
+
+      source:
+        record.source ?? null,
+
+      /* 用 typeof 守卫而不是可选链：可选链挡不住「标识符本身没声明」
+         （会直接 ReferenceError）。引擎没加载时日志还要能写。 */
+      math_engine_version:
+        record.math_engine_version ??
+        (typeof MathQuality !== 'undefined' && MathQuality
+          ? MathQuality.VERSION
+          : null),
+
+      // ── 每次尝试 ──
+      request_id:
+        record.request_id ?? null,
+
+      attempt_id:
+        record.attempt_id ?? null,
+
+      session_id:
+        record.session_id ?? null,
+
+      question_sequence:
+        record.question_sequence ?? null,
+
+      attempt:
+        record.attempt ?? null,
+
+      retry_index:
+        record.retry_index ?? null,
+
+      duration_ms:
+        record.duration_ms ?? null,
+
+      http_status:
+        record.http_status ?? null,
+
+      outcome:
+        record.outcome ?? null,
+
+      fallback:
+        record.fallback ?? null
+    };
+
+    diagRecords.push(
+      entry
+    );
+
+    if (diagRecords.length > DIAG_LIMIT) {
+      diagRecords.splice(0, diagRecords.length - DIAG_LIMIT);
+    }
+
+    if (entry.level === 'error') {
+      console.warn('[calcdaily]', entry.action, entry.kind || entry.event || '', entry.message || '');
+    } else if (entry.kind) {
+      console.log('[calcdaily]', entry.action, entry.kind, entry.message || '');
+    }
+
+    return entry;
+  }
+
+
+  function diagSummary() {
+    const summary = {
+      total: diagRecords.length,
+      byKind: {},
+      byAction: {},
+      byOutcome: {},
+      fallbackCount: 0,
+      staleDiscarded: 0
+    };
+
+    for (const entry of diagRecords) {
+      const kind = entry.kind || 'none';
+      summary.byKind[kind] = (summary.byKind[kind] || 0) + 1;
+
+      const action = entry.action || 'none';
+      summary.byAction[action] = (summary.byAction[action] || 0) + 1;
+
+      if (entry.outcome) {
+        summary.byOutcome[entry.outcome] =
+          (summary.byOutcome[entry.outcome] || 0) + 1;
+      }
+
+      if (entry.fallback === true) summary.fallbackCount += 1;
+
+      if (entry.kind === FAILURE_KINDS.STALE_RESPONSE) summary.staleDiscarded += 1;
+    }
+
+    return summary;
+  }
+
+
+  /* 判题「最后一公里」的结论也进日志：判题失败在用户那里表现为
+     「点提交没反应」，日志里必须留下可分辨的一行。 */
+  function diagJudgeOutcome(
+    question,
+    result,
+    extra = {}
+  ) {
+    return diagLog({
+      level:
+        result?.trusted === true ? 'info' : 'error',
+
+      action: 'judge',
+      event: 'verdict',
+      kind:
+        result?.trusted === true
+          ? null
+          : (result?.reason === MathQuality.JUDGE_REASONS.JUDGE_UNAVAILABLE
+              ? FAILURE_KINDS.JUDGE_NETWORK
+              : FAILURE_KINDS.JUDGE_UNCERTAIN),
+      message:
+        result?.trusted === true
+          ? (result.correct ? 'equivalent' : 'not_equivalent')
+          : String(result?.reason || 'untrusted'),
+      question_id: question?.question_id || question?.id || null,
+      module: question?.module || null,
+      tier: question?.tier ?? null,
+      verification_state: question?.verification_state ?? null,
+      source: question?.source || null,
+      outcome:
+        result?.trusted === true
+          ? (result.correct ? 'correct' : 'wrong')
+          : 'judge_failed',
+      ...extra
+    });
+  }
+
+
+  window.CalcDailyDiag = {
+    dump: () => diagRecords.slice(),
+    summary: diagSummary,
+    kinds: FAILURE_KINDS,
+    limit: DIAG_LIMIT,
+
+    clear() {
+      const n = diagRecords.length;
+      diagRecords.length = 0;
+      return n;
+    }
+  };
+
+
+  /* 云同步的状态本来只发一个 CustomEvent，界面上没有任何人去听它 ——
+     于是「学习记录再也同步不上去」这件事对用户和对我们一样不可见。
+     这里做两件事：进诊断日志；失败时用已有的 toast 提示一次（30 秒节流）。
+
+     提示只说「记录还在、稍后会自动补上」，不提同步细节 ——
+     用户需要知道的不是重试了几次，而是他的作答没有丢。 */
+  const SYNC_NOTICE_THROTTLE_MS = 30000;
+
+  let lastSyncNoticeAt = 0;
+
+
+  window.addEventListener(
+    'calcdaily:sync-status',
+    event => {
+      const detail = event?.detail || {};
+      const status = detail.status || 'unknown';
+
+      if (status !== 'error' && status !== 'offline') {
+        if (status === 'synced') {
+          diagLog({
+            level: 'info',
+            action: 'sync',
+            event: 'sync_status',
+            message: 'cloud_synced',
+            outcome: 'ok'
+          });
+        }
+
+        return;
+      }
+
+      diagLog({
+        level: 'error',
+        action: 'sync',
+        event: 'sync_status',
+        kind: FAILURE_KINDS.SYNC_FAILED,
+        message: detail.message || status,
+        outcome: status
+      });
+
+      const now = Date.now();
+
+      if (now - lastSyncNoticeAt < SYNC_NOTICE_THROTTLE_MS) {
+        return;
+      }
+
+      lastSyncNoticeAt = now;
+
+      toast(
+        status === 'offline'
+          ? '当前网络不可用，学习记录已暂存在本机，联网后会自动补同步。'
+          : '云端同步暂时失败，学习记录已存在本机，稍后会自动重试。'
+      );
+    }
+  );
 
 
   /*
@@ -1502,39 +1876,612 @@
     'https://calcdaily-d5g2titwue91551fb-1482769901.ap-shanghai.app.tcloudbase.com/api/deepseek';
 
 
-  async function apiCall(action, payload = {}) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), action === 'generate' ? 190000 : 50000);
-    try {
-      const response = await fetch(AI_API_URL, {
-        method:'POST', signal:controller.signal,
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({action,...payload})
-      });
-      const data=await response.json().catch(()=>({}));
-      if(!response.ok)throw new Error(data.error || `AI 请求失败 (${response.status})`);
-      return data;
-    } finally { clearTimeout(timer); }
+  /* ── 超时 / 重试 / 退避（Task 5F）──────────────────────────────
+
+     旧的预算是 generate 190 秒、其余 50 秒，而且**一次都不重试**。
+     这套预算有两头都不对：
+
+       1. 190 秒是照着服务端「两次生成 + 两次复核」的最坏情况配的。
+          真走到那一步，用户对着「正在准备题目…」等三分多钟 —— 而这段时间里
+          备用题库本来可以立刻给出一道已校验的题。宁可少一道动态题，
+          也不要让用户干等。
+       2. 一次都不重试，意味着一次握手抖动（DNS、连接被重置、CDN 502）
+          就直接掉进备用题 —— 明明再试一次就成功了。
+
+     新预算按「服务端一次往返的真实耗时」定，而不是照着它的最坏情况：
+
+       generate  60s      服务端典型 15~35s（含一次复核失败重来）
+       judge     22s      服务端判题预算已收到 20s
+       evaluate  25s      难度标定，失败不影响出题
+
+     重试策略刻意不对称：
+       · 判题：任何可重试失败都重试 1 次（含超时）—— 预算小，值得再试
+       · 出题：超时**不**重试。超时说明服务已经吃力，再等一个满额超时
+         只会把等待翻倍；这一路的正确处置是立刻退到备用题库。
+         连接类失败（握手抖动、5xx、429）才重试，这类失败几乎不耗时。
+     ========================================================= */
+
+  const API_TIMEOUTS = {
+    generate: 60000,
+    judge: 22000,
+    evaluate: 25000
+  };
+
+  const API_RETRY = {
+    generate: { attempts: 2 },
+    judge: { attempts: 2 },
+    evaluate: { attempts: 1 }
+  };
+
+  /* 整体预算（wall-clock deadline）。每次超时都只是「这一次」的上限，
+     真正决定用户等多久的是「这一次 + 退避 + 下一次」。把总预算钉死，
+     才对得上「不再出现 180~190 秒等待」这条要求：
+
+       generate  90s   最坏 = 一次快速失败 + 退避 + 一次满额超时
+       judge     45s   最坏 = 两次 22s
+       evaluate  25s   标定失败不影响出题，没有必要等更久
+
+     超预算时不再重试，直接把这次失败抛出去 —— 由上层决定退到备用题库。
+     让用户为「再试一次」多等一分钟，比直接给一道已校验的备用题糟得多。 */
+  const API_BUDGETS = {
+    generate: 90000,
+    judge: 45000,
+    evaluate: 25000
+  };
+
+  const RETRY_BASE_MS = 600;
+
+  const RETRY_JITTER_MS = 600;
+
+  const sleep = ms =>
+    new Promise(
+      resolve =>
+        setTimeout(
+          resolve,
+          ms
+        )
+    );
+
+
+  /* 退避固定落在 600~1200ms：太短等于连打服务端，太长不如直接走备用题。
+     抖动是必要的 —— 多标签页同时失败时不该在同一毫秒一起回来。 */
+  function retryDelay(
+    retryIndex = 0
+  ) {
+    return Math.round(
+      RETRY_BASE_MS +
+      Math.random() * RETRY_JITTER_MS
+    );
+  }
+
+
+  function apiTimeoutError(
+    action,
+    timeoutMs
+  ) {
+    const error = new Error(
+      action === 'judge'
+        ? `判题请求超时（${Math.round(timeoutMs / 1000)}s）`
+        : `AI 请求超时（${Math.round(timeoutMs / 1000)}s）`
+    );
+
+    error.name = 'TimeoutError';
+    error.code = 'CLIENT_TIMEOUT';
+    error.timeoutMs = timeoutMs;
+    error.httpStatus = null;
+
+    return error;
+  }
+
+
+  function apiFailureKind(
+    action,
+    error
+  ) {
+    const judge =
+      action === 'judge';
+
+    if (error?.httpStatus) {
+      return judge
+        ? FAILURE_KINDS.JUDGE_HTTP
+        : FAILURE_KINDS.GENERATE_HTTP;
+    }
+
+    if (
+      error?.name === 'AbortError' ||
+      error?.name === 'TimeoutError' ||
+      error?.code === 'CLIENT_TIMEOUT'
+    ) {
+      return judge
+        ? FAILURE_KINDS.JUDGE_TIMEOUT
+        : FAILURE_KINDS.GENERATE_TIMEOUT;
+    }
+
+    if (error?.code === 'CLIENT_PROTOCOL_ERROR') {
+      return judge
+        ? FAILURE_KINDS.JUDGE_PROTOCOL
+        : FAILURE_KINDS.GENERATE_PROTOCOL;
+    }
+
+    return judge
+      ? FAILURE_KINDS.JUDGE_NETWORK
+      : FAILURE_KINDS.GENERATE_NETWORK;
+  }
+
+
+  /* 400/401/403/404 这类错误重试多少次都是同一个结果，直接抛；
+     429、5xx、超时、连接中断才值得再来一次。 */
+  function apiRetryable(
+    action,
+    error
+  ) {
+    const status =
+      Number(error?.httpStatus);
+
+    if (
+      Number.isFinite(status) &&
+      error?.httpStatus !== null
+    ) {
+      return (
+        status === 429 ||
+        status === 408 ||
+        status >= 500
+      );
+    }
+
+    if (error?.code === 'CLIENT_PROTOCOL_ERROR') {
+      return false;
+    }
+
+    const timedOut =
+      error?.name === 'AbortError' ||
+      error?.name === 'TimeoutError' ||
+      error?.code === 'CLIENT_TIMEOUT';
+
+    // 出题不重试超时：重试会把等待翻倍，而备用题库立刻就能兜住（见上）
+    if (timedOut && action === 'generate') {
+      return false;
+    }
+
+    return true;
+  }
+
+
+  async function apiCall(
+    action,
+    payload = {},
+    options = {}
+  ) {
+    const timeoutMs =
+      Number(options.timeoutMs) ||
+      API_TIMEOUTS[action] ||
+      25000;
+
+    const attempts =
+      Math.max(
+        1,
+        Number(options.attempts) ||
+        API_RETRY[action]?.attempts ||
+        1
+      );
+
+    const requestId =
+      payload.request_id ||
+      nextRequestId(action);
+
+    const attemptId =
+      nextRequestId('attempt');
+
+    const budgetMs =
+      Number(options.budgetMs) ||
+      API_BUDGETS[action] ||
+      timeoutMs;
+
+    const deadline =
+      Date.now() + budgetMs;
+
+    let lastError =
+      null;
+
+    for (
+      let attempt = 0;
+      attempt < attempts;
+      attempt++
+    ) {
+      if (attempt > 0) {
+        const delay =
+          retryDelay(attempt - 1);
+
+        if (Date.now() + delay + 1000 > deadline) {
+          diagLog({
+            level: 'error',
+            action,
+            event: 'retry_skipped',
+            kind: apiFailureKind(action, lastError),
+            message: '整体预算不足，不再重试',
+            request_id: requestId,
+            attempt_id: attemptId,
+            attempt: attempt + 1,
+            retry_index: attempt,
+            duration_ms: Date.now() - (deadline - budgetMs),
+            outcome: 'budget_exhausted'
+          });
+
+          break;
+        }
+
+        await sleep(
+          delay
+        );
+      }
+
+      const startedAt =
+        Date.now();
+
+      const remaining =
+        deadline - startedAt;
+
+      if (remaining <= 1000) {
+        break;
+      }
+
+      /* 单次超时不超过剩余预算，否则「总预算」只是个装饰。
+         下限 1 秒：低于它的超时会把正常的往返也掐掉，等于把「慢」误报成「断」。 */
+      const attemptTimeout =
+        Math.max(
+          1000,
+          Math.min(timeoutMs, remaining)
+        );
+
+      const controller =
+        new AbortController();
+
+      const timer =
+        setTimeout(
+          () => controller.abort(),
+          attemptTimeout
+        );
+
+      try {
+        const response =
+          await fetch(
+            AI_API_URL,
+            {
+              method: 'POST',
+              signal: controller.signal,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action,
+                request_id: requestId,
+                session_id: payload.session_id ?? null,
+                question_sequence: payload.question_sequence ?? null,
+                attempt: attempt + 1,
+                ...payload
+              })
+            }
+          );
+
+        const data =
+          await response
+            .json()
+            .catch(
+              () => null
+            );
+
+        if (!response.ok) {
+          const error = new Error(
+            data?.error ||
+            `AI 请求失败 (${response.status})`
+          );
+
+          error.httpStatus =
+            response.status;
+
+          error.code =
+            data?.code || null;
+
+          throw error;
+        }
+
+        if (!data) {
+          const error =
+            new Error('AI 返回体不是 JSON');
+
+          error.code = 'CLIENT_PROTOCOL_ERROR';
+          error.httpStatus = null;
+
+          throw error;
+        }
+
+        diagLog({
+          level: 'info',
+          action,
+          event: 'http_attempt',
+          message: `ok attempt ${attempt + 1}/${attempts}`,
+          request_id: requestId,
+          attempt_id: attemptId,
+          session_id: payload.session_id ?? null,
+          question_sequence: payload.question_sequence ?? null,
+          attempt: attempt + 1,
+          retry_index: attempt,
+          duration_ms: Date.now() - startedAt,
+          http_status: response.status,
+          outcome: 'ok'
+        });
+
+        return data;
+
+      } catch (caught) {
+        const aborted =
+          caught?.name === 'AbortError';
+
+        const error =
+          aborted
+            ? apiTimeoutError(action, attemptTimeout)
+            : caught;
+
+        const retryable =
+          apiRetryable(action, error);
+
+        const willRetry =
+          retryable &&
+          attempt + 1 < attempts;
+
+        diagLog({
+          level: 'error',
+          action,
+          event: 'http_attempt',
+          kind: apiFailureKind(action, error),
+          message: error?.message || String(error),
+          request_id: requestId,
+          attempt_id: attemptId,
+          session_id: payload.session_id ?? null,
+          question_sequence: payload.question_sequence ?? null,
+          attempt: attempt + 1,
+          retry_index: attempt,
+          duration_ms: Date.now() - startedAt,
+          http_status: error?.httpStatus ?? null,
+          outcome: willRetry ? 'retry' : 'failed'
+        });
+
+        lastError = error;
+
+        if (!willRetry) {
+          break;
+        }
+
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    throw lastError ||
+      new Error('AI 请求失败');
+  }
+
+
+  /* ── 协议与版本（Task 5I）────────────────────────────────────
+
+     旧的健康检查只做一件事：res.ok。于是不管线上跑的是哪一版引擎，
+     界面都显示「DeepSeek 已连接」—— 而「连上了」和「连上了一个能按
+     当前规则判题的版本」是两件完全不同的事。
+
+     版本不匹配有两种后果，且都真实发生过：
+       · 出题侧：服务端按旧规则标记 verification，客户端按新规则校验直接
+         判它 stale，用户看到「AI 出题失败，已使用备用题」，但根本原因
+         其实是劈叉部署，而不是模型不行；
+       · 判题侧：旧服务端可能对某些形态给出「确定等价」的结论，而新客户端
+         的引擎根本没法独立复核它 —— 这就是「错答放行」的入口。
+
+     所以：
+       1. 启动时读 health，比对五个版本，结论挂在界面上（不再只说「已连接」）；
+       2. 每一次请求的响应里都带 versions，**逐次**校验。启动时对得上、返回时
+          对不上（灰度、多实例、CDN 缓存）也必须拦。
+     ========================================================= */
+
+  const HEALTH_TIMEOUT_MS = 8000;
+
+  function clientPipeline() {
+    return {
+      protocol: 2,
+      generator: 'generator-v2',
+      reviewer: 'reviewer-v2',
+      judge: 'judge-v2',
+      engine:
+        typeof MathQuality !== 'undefined' && MathQuality
+          ? MathQuality.VERSION
+          : null
+    };
+  }
+
+
+  function pipelineMismatch(
+    actual
+  ) {
+    const expected =
+      clientPipeline();
+
+    if (!actual || typeof actual !== 'object') {
+      return {
+        ok: false,
+        reason: 'missing_versions',
+        expected,
+        actual: null,
+        message: '响应里没有版本信息'
+      };
+    }
+
+    /* 引擎版本是第一位的：验证规则由它决定。引擎不同，服务端的
+       verification 与本机的 content/形态判定就可能不是同一套。 */
+    const actualEngine =
+      actual.math_engine ??
+      actual.engine ??
+      null;
+
+    if (actualEngine !== expected.engine) {
+      return {
+        ok: false,
+        reason: 'engine_version_mismatch',
+        expected,
+        actual: actualEngine,
+        message: `数学引擎版本不一致（本机 ${expected.engine || '未知'} / 服务端 ${actualEngine || '未知'}）`
+      };
+    }
+
+    const actualProtocol =
+      actual.protocol ??
+      null;
+
+    if (Number(actualProtocol) !== Number(expected.protocol)) {
+      return {
+        ok: false,
+        reason: 'protocol_version_mismatch',
+        expected,
+        actual: actualProtocol,
+        message: `接口协议版本不一致（本机 v${expected.protocol} / 服务端 v${actualProtocol ?? '未知'}）`
+      };
+    }
+
+    return {
+      ok: true,
+      reason: 'match',
+      expected,
+      actual,
+      message: `协议 v${expected.protocol} · 引擎 ${expected.engine}`
+    };
+  }
+
+
+  /* 逐次校验：响应里的 versions（出错响应一直带着它，成功响应 Task 5I 起也带）。 */
+  function checkResponseProtocol(
+    data
+  ) {
+    return pipelineMismatch(
+      data?.versions ||
+      data?.pipeline ||
+      null
+    );
+  }
+
+
+  /* 「已经确定不匹配」才走短路径。还没测过（apiProtocol === null）不拦 ——
+     否则每次冷启动的头几秒都只能拿到备用题。 */
+  function knownProtocolMismatch() {
+    return Boolean(
+      apiProtocol &&
+      apiProtocol.ok === false &&
+      [
+        'engine_version_mismatch',
+        'protocol_version_mismatch'
+      ].includes(
+        apiProtocol.reason
+      )
+    );
   }
 
 
   async function checkApiHealth() {
+    const controller =
+      new AbortController();
+
+    const timer =
+      setTimeout(
+        () => controller.abort(),
+        HEALTH_TIMEOUT_MS
+      );
+
     try {
       const res =
         await fetch(
           `${AI_API_URL}?health=1`,
           {
             cache:
-              'no-store'
+              'no-store',
+
+            signal:
+              controller.signal
           }
         );
 
-      apiHealthy =
-        res.ok;
+      const data =
+        await res
+          .json()
+          .catch(
+            () => null
+          );
 
-    } catch {
+      apiHealthy =
+        res.ok &&
+        data?.ok !== false;
+
+      const mismatch =
+        pipelineMismatch(
+          data?.pipeline ||
+          (data && data.protocol_version !== undefined
+            ? {
+                protocol: data.protocol_version,
+                generator: data.generator_version,
+                reviewer: data.reviewer_version,
+                judge: data.judge_version,
+                math_engine: data.math_engine_version
+              }
+            : null)
+        );
+
+      apiProtocol = {
+        ...mismatch,
+        checkedAt: new Date().toISOString(),
+        httpOk: res.ok
+      };
+
+      if (!mismatch.ok) {
+        diagLog({
+          level: 'error',
+          action: 'health',
+          event: 'protocol_check',
+          kind: FAILURE_KINDS.PROTOCOL_MISMATCH,
+          message: mismatch.message,
+          http_status: res.status,
+          outcome: 'mismatch'
+        });
+      } else {
+        diagLog({
+          level: 'info',
+          action: 'health',
+          event: 'protocol_check',
+          message: mismatch.message,
+          http_status: res.status,
+          outcome: 'ok'
+        });
+      }
+
+    } catch (error) {
       apiHealthy =
         false;
+
+      /* 连不上不是「协议不匹配」—— 不能因为一次网络抖动就把出题路径
+         永久切到备用题库。这里只记 ok:null，出题照常尝试。 */
+      apiProtocol = {
+        ok: null,
+        reason: error?.name === 'AbortError' ? 'health_timeout' : 'unreachable',
+        expected: clientPipeline(),
+        actual: null,
+        message: '健康检查没拿到响应',
+        checkedAt: new Date().toISOString(),
+        httpOk: false
+      };
+
+      diagLog({
+        level: 'error',
+        action: 'health',
+        event: 'protocol_check',
+        kind: error?.name === 'AbortError' ? FAILURE_KINDS.GENERATE_TIMEOUT : FAILURE_KINDS.GENERATE_NETWORK,
+        message: error?.message || String(error),
+        outcome: 'unreachable'
+      });
+
+    } finally {
+      clearTimeout(timer);
     }
 
     renderApiStatus();
@@ -1646,6 +2593,22 @@
     }
 
 
+    /* 「连上了」和「连上了一个按当前规则判题的版本」不是一回事（Task 5I）。
+       劈叉部署时最危险的状态恰恰是「连接正常」—— 界面越平静，问题越难被发现。 */
+    if (
+      apiProtocol &&
+      apiProtocol.ok === false
+    ) {
+      text.textContent =
+        `后端版本不匹配 · ${apiProtocol.message}（已改用备用题库）`;
+
+      dot.className =
+        'h-2 w-2 rounded-full bg-rose-500';
+
+      return;
+    }
+
+
     if (
       apiHealthy === true &&
       apiLastError
@@ -1663,8 +2626,13 @@
     if (
       apiHealthy === true
     ) {
+      const version =
+        apiProtocol?.ok === true
+          ? ` · 协议 v${apiProtocol.expected.protocol}`
+          : '';
+
       text.textContent =
-        'DeepSeek 已连接';
+        `DeepSeek 已连接${version}`;
 
       dot.className =
         'h-2 w-2 rounded-full bg-emerald-500';
@@ -3223,6 +4191,48 @@
     return MathQuality.approved(q);
   }
 
+
+  /* ── Task 5D：Canonical Package 冻结 ──────────────────────────
+     题目一进会话就记下身份指纹。之后不管是判题、预取、复习队列还是渲染，
+     只要有人改动了七个 canonical 字段里的任何一个，指纹就对不上 ——
+     这时**不能再拿这道题去判用户的答案**：题目已经不知道自己是谁，
+     判出来的「对/错」没有任何依据。
+
+     注意指纹只覆盖身份（题面 + 标准答案 + 来源 + 验证版本），
+     不覆盖难度：难度是标定量，会随作答重算，改了它不算题目变了。 */
+  function freezeQuestion(
+    question
+  ) {
+    if (!question || typeof question !== 'object') {
+      return question;
+    }
+
+    if (typeof MathQuality.freezeCanonical !== 'function') {
+      return question;
+    }
+
+    return MathQuality.freezeCanonical(
+      question
+    );
+  }
+
+
+  function canonicalIntegrityOf(
+    question
+  ) {
+    if (
+      typeof MathQuality.canonicalIntegrity ===
+      'function'
+    ) {
+      return MathQuality.canonicalIntegrity(
+        question
+      );
+    }
+
+    return { ok: true, recorded: null, actual: null, reason: 'unsupported' };
+  }
+
+
   function reportQuestionIssue(q, userAnswer = '', judgeResult = null) {
     const report = {at: new Date().toISOString(), question_id: q.question_id || q.id,
       question: {module:q.module, topic:q.topic, instruction:q.instruction, expression:q.expression, prompt:q.prompt},
@@ -3260,7 +4270,12 @@
      这两件事以前是同一个 trusted:false，界面于是把网络故障也说成
      「这道题存在异常，已自动作废」：题本身是对的，用户却被告知题有问题，
      而且这一次作答直接没了、练习卡在原地。
-     现在网络/协议类失败一律保留题目和已经写下的答案，只提示网络问题并允许重试。 */
+     现在网络/协议类失败一律保留题目和已经写下的答案，只提示网络问题并允许重试。
+
+     judge_uncertain 在这一版里多了一层含义：确定性引擎、结构检查都给不出结论，
+     而模型说的又是「等价」（Task #4 起模型不能单独判对）—— 也就是「机器暂时
+     判不了」。它不是失败，是能力边界：文案必须这么说，且不计入学习数据
+     （调用方在 trusted!==true 时直接 return，不会写能力/主题/复习队列）。 */
   function judgeUnavailable(verdict,userAnswer) {
     const button = $('submitAnswerBtn');
     if (button) { button.disabled = false; button.textContent = '重试提交'; }
@@ -3271,7 +4286,7 @@
 
     toast(
       verdict?.reason === 'judge_uncertain'
-        ? '判题服务这次没能给出结论，题目本身没有问题。请再提交一次。'
+        ? '暂时无法可靠判断这个答案。这一次不计入统计，题目本身没有问题，可以再提交一次。'
         : '连不上判题服务（网络问题，不是题目问题）。你的答案已保留，请重试。'
     );
   }
@@ -3281,29 +4296,134 @@
        judge_unavailable   判题服务连不上      → 保留题目，让用户重试
        judge_uncertain     判题返回了但不可用  → 保留题目，让用户重试
      把它们压成一个 trusted:false，上层就只能一刀切。 */
-  async function judgeAnswer(question,userAnswer) {
+  async function judgeAnswer(question,userAnswer,meta={}) {
+    /* Task 5D：先核对题目身份。trustedQuestion 对备用题是按 bankId 命中的，
+       只要 id 存在就放行 —— 一道备用题的答案被就地改写，它会照样"可信"，
+       然后拿着被改过的答案去判用户的卷子。这道闸必须单独守。 */
+    const integrity = canonicalIntegrityOf(question);
+
+    if (!integrity.ok) {
+      reportQuestionIssue(question, userAnswer, {reason:'canonical_mutated'});
+      diagJudgeOutcome(question, {trusted:false, reason:MathQuality.JUDGE_REASONS.QUESTION_UNTRUSTED}, {
+        kind: FAILURE_KINDS.CANONICAL_MUTATED,
+        session_id: meta.session_id ?? null,
+        question_sequence: meta.question_sequence ?? null,
+        message: '题目身份指纹对不上，已停手'
+      });
+      return {correct:null,trusted:false,reason:MathQuality.JUDGE_REASONS.QUESTION_UNTRUSTED,
+        canonical:{recorded:integrity.recorded,actual:integrity.actual}};
+    }
+
     if(!trustedQuestion(question)) {
+      diagJudgeOutcome(question, {trusted:false, reason:MathQuality.JUDGE_REASONS.QUESTION_UNTRUSTED}, {
+        session_id: meta.session_id ?? null,
+        question_sequence: meta.question_sequence ?? null,
+        message: '题目未通过可信性检查'
+      });
       return {correct:null,trusted:false,reason:MathQuality.JUDGE_REASONS.QUESTION_UNTRUSTED};
     }
 
-    const decision=MathQuality.compare(userAnswer,question.answer);
-    if(decision!=='uncertain') {
-      return {correct:decision==='equivalent',verdict:decision,trusted:true,method:'deterministic',
-        feedback:decision==='equivalent'?'与参考答案数学等价。':'与参考答案不等价。'};
+    // 本地引擎也要走完整两层：先标量比较，再结构检查。
+    // 只比标量的话，表达式形态的答案（比如参考答案外面套了个系数）一路漏到
+    // 服务端模型那里，而模型对这种形态是会对错判的 —— 这条泄漏在浏览器里就
+    // 存在，不是服务端独有。
+    // 带一次回退：静态站的前端和引擎是两个文件，万一浏览器缓存了新 app.js
+    // 配旧 math-quality.js，至少退回旧行为，而不是整个判题报错。
+    const decision = MathQuality.judgeDeterministic
+      ? MathQuality.judgeDeterministic(question,userAnswer)
+      : {verdict:MathQuality.compare(userAnswer,question.answer),layer:'scalar'};
+
+    if(decision.verdict!=='uncertain') {
+      const local={correct:decision.verdict==='equivalent',verdict:decision.verdict,trusted:true,method:'deterministic',
+        judge_layer:decision.layer,
+        feedback:decision.verdict==='equivalent'?'与参考答案数学等价。':'与参考答案不等价。'};
+
+      diagJudgeOutcome(question, local, {
+        session_id: meta.session_id ?? null,
+        question_sequence: meta.question_sequence ?? null,
+        message: `deterministic:${decision.layer}`
+      });
+
+      return local;
     }
 
     try {
-      const result=await apiCall('judge',{question,userAnswer});
+      const result=await apiCall('judge',{question,userAnswer,
+        request_id: nextRequestId('judge'),
+        session_id: meta.session_id ?? null,
+        question_sequence: meta.question_sequence ?? null});
+
+      /* Task 5I：逐次校验服务端版本，而不是靠启动时那一次 health。
+         请求发出到返回之间，后端可能已经灰度到另一版；一个「握手时对得上、
+         返回时对不上」的响应不能被当成可信结论，尤其不能被当成「答对了」。
+
+         版本对不上时不判对也不判错 —— 归到 judge_uncertain，
+         保留题目与答案让用户重试。宁可多按一次提交，也不要给错结论。 */
+      const protocol =
+        checkResponseProtocol(result);
+
+      if(!protocol.ok && result?.verdict==='equivalent') {
+        markApiRequestSuccess();
+
+        diagJudgeOutcome(question, {trusted:false, reason:MathQuality.JUDGE_REASONS.JUDGE_UNCERTAIN}, {
+          kind: FAILURE_KINDS.PROTOCOL_MISMATCH,
+          session_id: meta.session_id ?? null,
+          question_sequence: meta.question_sequence ?? null,
+          message: `引擎版本不一致（本机 ${MathQuality.VERSION} / 服务端 ${protocol.actual ?? '未知'}）`
+        });
+
+        return {correct:null,trusted:false,reason:MathQuality.JUDGE_REASONS.JUDGE_UNCERTAIN,verdict:result.verdict,
+          protocol_mismatch:true,versions:protocol};
+      }
 
       if(result.trusted===true && ['equivalent','not_equivalent'].includes(result.verdict)) {
+        // 模型不能单独把答案判「对」。只有确定性引擎（含结构检查）给出的
+        // equivalent 才算数；服务端要是越权返回了 method:'ai' 的对判，这里拦掉。
+        // 这是「错答放行率 = 0」在客户端的最后一道闸 —— 服务端已按同一规则收紧，
+        // 但两处都守住，才不会因为一次服务端改动就悄悄漏回去。
+        if(result.verdict==='equivalent' && result.method!=='deterministic') {
+          markApiRequestSuccess();
+
+          const rejected={correct:null,trusted:false,reason:MathQuality.JUDGE_REASONS.JUDGE_UNCERTAIN,verdict:result.verdict};
+
+          diagJudgeOutcome(question, rejected, {
+            kind: FAILURE_KINDS.JUDGE_UNCERTAIN,
+            session_id: meta.session_id ?? null,
+            question_sequence: meta.question_sequence ?? null,
+            message: `模型越权对判 method=${result.method ?? 'unknown'}`
+          });
+
+          return rejected;
+        }
+
         markApiRequestSuccess();
-        return {...result,correct:result.verdict==='equivalent'};
+
+        const accepted={...result,correct:result.verdict==='equivalent'};
+
+        diagJudgeOutcome(question, accepted, {
+          kind: null,
+          session_id: meta.session_id ?? null,
+          question_sequence: meta.question_sequence ?? null,
+          message: `${result.method ?? 'server'}:${result.judge_layer ?? result.layer ?? 'unknown'}`
+        });
+
+        return accepted;
       }
 
       // 判题员怀疑题目给定的标准答案本身有问题。作废这道题，但这不是学生的错。
       if(result.verdict==='canonical_suspected') {
         markApiRequestSuccess();
-        return {correct:null,trusted:false,reason:MathQuality.JUDGE_REASONS.CANONICAL_SUSPECTED,verdict:result.verdict};
+
+        const suspected={correct:null,trusted:false,reason:MathQuality.JUDGE_REASONS.CANONICAL_SUSPECTED,verdict:result.verdict};
+
+        diagJudgeOutcome(question, suspected, {
+          kind: FAILURE_KINDS.CANONICAL_MUTATED,
+          session_id: meta.session_id ?? null,
+          question_sequence: meta.question_sequence ?? null,
+          message: '服务端怀疑标准答案本身有问题'
+        });
+
+        return suspected;
       }
 
       // 服务端已经区分了「题目不可信」和「判题服务不可用」，照搬它的原因，
@@ -3320,10 +4440,30 @@
         SERVER_REASONS[result.reason] ||
         MathQuality.JUDGE_REASONS.JUDGE_UNCERTAIN;
 
-      return {correct:null,trusted:false,reason,verdict:result?.verdict};
+      const unresolved={correct:null,trusted:false,reason,verdict:result?.verdict};
+
+      diagJudgeOutcome(question, unresolved, {
+        session_id: meta.session_id ?? null,
+        question_sequence: meta.question_sequence ?? null,
+        message: `server:${reason}`
+      });
+
+      return unresolved;
     } catch(error) {
       markApiRequestFailure(error);
-      return {correct:null,trusted:false,reason:MathQuality.JUDGE_REASONS.JUDGE_UNAVAILABLE,error};
+
+      const failed={correct:null,trusted:false,reason:MathQuality.JUDGE_REASONS.JUDGE_UNAVAILABLE,error};
+
+      diagJudgeOutcome(question, failed, {
+        kind: apiFailureKind('judge', error),
+        session_id: meta.session_id ?? null,
+        question_sequence: meta.question_sequence ?? null,
+        duration_ms: error?.timeoutMs ? error.timeoutMs : null,
+        http_status: error?.httpStatus ?? null,
+        message: error?.message || String(error)
+      });
+
+      return failed;
     }
   }
 
@@ -3464,7 +4604,10 @@
       );
 
 
-    return {
+    /* Task 5D：备用题的可信来源是题库，但它的身份同样要冻结。
+       否则「题库里有这个 id」就成了唯一凭据 —— 一道备用题的答案被就地改写，
+       trustedQuestion 仍会按 bankId 放行，然后拿被改过的答案去判用户的卷子。 */
+    return freezeQuestion({
       ...base,
 
       id:
@@ -3521,7 +4664,7 @@
       reviewId:
         plan.reviewId ||
         null
-    };
+    });
   }
 
 
@@ -3826,9 +4969,41 @@
 
 
   async function generateOneQuestion(
-    plan
+    plan,
+    meta = {}
   ) {
+    const requestId =
+      meta.request_id ||
+      nextRequestId('generate');
+
+    const sessionId =
+      meta.session_id ??
+      null;
+
+    const sequence =
+      meta.question_sequence ??
+      null;
+
+    const startedAt =
+      Date.now();
+
     try {
+      /* 已经确定后端版本不匹配时不再发请求。等满 60 秒再退回备用题，
+         对用户毫无价值 —— 那道题无论如何都不会被采用（闸门会判它 stale）。 */
+      if (knownProtocolMismatch()) {
+        const error =
+          new Error(
+            apiProtocol?.message ||
+            '后端版本不匹配，已改用备用题库'
+          );
+
+        error.code = 'CLIENT_PROTOCOL_ERROR';
+        error.protocol = apiProtocol;
+
+        throw error;
+      }
+
+
       const data =
         await apiCall(
           'generate',
@@ -3847,9 +5022,53 @@
             avoidPrompts:
               recentQuestionPrompts(
                 10
-              )
+              ),
+
+            request_id:
+              requestId,
+
+            session_id:
+              sessionId,
+
+            question_sequence:
+              sequence
           }
         );
+
+
+      /* 服务端会把 request_id 原样回显。对不上就说明这个响应不属于这次请求
+         （乱序、代理缓存、或服务端串了），宁可当失败重来，也不要把它当成
+         这一次的题目 —— 那正是「题目跟位置对不上」最脏的一种成因。 */
+      if (
+        data.request_id &&
+        data.request_id !==
+          requestId
+      ) {
+        const error = new Error(
+          `出题响应与请求不匹配（${data.request_id} ≠ ${requestId}）`
+        );
+
+        error.code = 'CLIENT_PROTOCOL_ERROR';
+
+        throw error;
+      }
+
+
+      /* Task 5I：版本逐次校验，不依赖启动时那一次 health。 */
+      const protocol =
+        checkResponseProtocol(
+          data
+        );
+
+
+      if (!protocol.ok) {
+        const error = new Error(protocol.message);
+
+        error.code = 'CLIENT_PROTOCOL_ERROR';
+        error.protocol = protocol;
+
+        throw error;
+      }
 
 
       if (
@@ -3858,9 +5077,12 @@
         ) ||
         !data.questions.length
       ) {
-        throw new Error(
-          'AI 返回题目为空'
-        );
+        const error =
+          new Error('AI 返回题目为空');
+
+        error.code = 'GENERATE_EMPTY';
+
+        throw error;
       }
 
 
@@ -3871,7 +5093,31 @@
         data.questions[0];
 
 
-      if (!MathQuality.approved(q)) throw new Error('题目未通过独立质量审核');
+      /* 出题这一侧用**严格**闸门（Task 5C/5D）：UNCERTAIN 不放行。
+         引擎验不了形态的题（Tier C）不该发给学生，退到已校验的备用题库。
+         注意判题那一侧仍然用宽松的 approved() —— 用户正在做的题不能被
+         「机器验不了」判成异常并作废。两侧的松紧不同是有意的。 */
+      const acceptable =
+        typeof MathQuality.gateApproved === 'function'
+          ? MathQuality.gateApproved(q)
+          : MathQuality.approved(q);
+
+
+      if (!acceptable) {
+        const decision = MathQuality.gateDecision(q);
+
+        const error = new Error(
+          decision.code === MathQuality.CODES.UNVERIFIED_SHAPE
+            ? '题目形态无法独立验证，已改用备用题'
+            : '题目未通过独立质量审核'
+        );
+
+        error.code = decision.code || 'GENERATION_REJECTED';
+        error.state = decision.state || null;
+        error.tier = decision.tier ?? null;
+
+        throw error;
+      }
 
       const provisionalDifficulty =
         clamp(
@@ -4015,6 +5261,33 @@
       };
 
 
+      /* Task 5D：题目进会话之前就把身份钉住。放在这里而不是交给各个调用方，
+         是因为这是唯一一处「题目刚刚成形」的地方 —— 之后无论谁拿着它去渲染、
+         预取还是判题，指纹都已经是基准值。 */
+      freezeQuestion(
+        question
+      );
+
+
+      diagLog({
+        level: 'info',
+        action: 'generate',
+        event: 'question_ready',
+        message: 'ai',
+        question_id: question.question_id || question.id || null,
+        module: question.module || null,
+        tier: q.tier ?? null,
+        verification_state: q.verification_state ?? null,
+        source: 'ai',
+        request_id: requestId,
+        session_id: sessionId,
+        question_sequence: sequence,
+        duration_ms: Date.now() - startedAt,
+        outcome: 'ok',
+        fallback: false
+      });
+
+
       if (
         plan.purpose ===
         'diagnosis'
@@ -4040,14 +5313,66 @@
       );
 
 
+      /* 失败分类：同一条「出题失败」在日志里必须能分辨是超时、网络、
+         协议不匹配、还是题目被闸门拒了 —— 这四件事的处置完全不同。 */
+      const kind =
+        error?.code === 'CLIENT_PROTOCOL_ERROR'
+          ? FAILURE_KINDS.GENERATE_PROTOCOL
+          : error?.code === 'GENERATE_EMPTY'
+            ? FAILURE_KINDS.GENERATE_EMPTY
+            : error?.code === MathQuality.CODES.UNVERIFIED_SHAPE
+              ? FAILURE_KINDS.GENERATE_UNVERIFIED
+              : error?.code
+                ? FAILURE_KINDS.GENERATE_REJECTED
+                : apiFailureKind('generate', error);
+
+      diagLog({
+        level: 'error',
+        action: 'generate',
+        event: 'question_failed',
+        kind,
+        message: error?.message || String(error),
+        module: plan?.module || null,
+        request_id: requestId,
+        session_id: sessionId,
+        question_sequence: sequence,
+        duration_ms: Date.now() - startedAt,
+        http_status: error?.httpStatus ?? null,
+        outcome: 'fallback',
+        fallback: true
+      });
+
+
       toast(
         `AI 本次出题失败，已使用备用题：${shortApiError(error)}`
       );
 
 
-      return fallbackQuestion(
-        plan
-      );
+      const fallback =
+        fallbackQuestion(
+          plan
+        );
+
+
+      diagLog({
+        level: 'info',
+        action: 'generate',
+        event: 'question_ready',
+        kind: FAILURE_KINDS.FALLBACK_USED,
+        message: 'fallback',
+        question_id: fallback?.question_id || fallback?.id || null,
+        module: fallback?.module || null,
+        source: 'fallback',
+        request_id: requestId,
+        session_id: sessionId,
+        question_sequence: sequence,
+        duration_ms: Date.now() - startedAt,
+        outcome: 'ok',
+        fallback: true
+      });
+
+
+      return fallback;
     }
   }
 
@@ -4255,9 +5580,14 @@
     const key =
       session.id;
 
+    const sequence =
+      session
+        .results
+        .length;
+
 
     const signature =
-      `${session.results.length}:` +
+      `${sequence}:` +
       JSON.stringify(
         plan
       );
@@ -4277,14 +5607,82 @@
     }
 
 
-    const promise =
+    const entry = {
+      request_id:
+        nextRequestId('prefetch'),
+
+      session_id:
+        key,
+
+      question_sequence:
+        sequence,
+
+      signature,
+
+      resultCount:
+        sequence,
+
+      plan,
+
+      issued:
+        ++prefetchIssued,
+
+      startedAt:
+        Date.now(),
+
+      promise: null
+    };
+
+
+    /* 旧请求不许顶掉新请求。这一条挡的是「预取 A 先发、预取 B 后发，
+       但 A 的写入晚于 B」——不挡的话，用户在 B 的位置上会拿到 A 生成的题。 */
+    if (
+      !prefetchSupersedes(
+        entry,
+        existing
+      )
+    ) {
+      discardPrefetch(
+        entry,
+        'superseded_by_newer_prefetch'
+      );
+
+      return;
+    }
+
+
+    if (existing) {
+      discardPrefetch(
+        existing,
+        'superseded_by_newer_prefetch'
+      );
+    }
+
+
+    entry.promise =
       generateOneQuestion(
-        plan
+        plan,
+        {
+          request_id:
+            entry.request_id,
+
+          session_id:
+            key,
+
+          question_sequence:
+            sequence
+        }
       )
         .then(
           question => ({
             question,
-            plan
+            plan,
+            request_id:
+              entry.request_id,
+            session_id:
+              key,
+            question_sequence:
+              sequence
           })
         )
         .catch(
@@ -4301,16 +5699,7 @@
 
     sessionPrefetch.set(
       key,
-      {
-        signature,
-
-        resultCount:
-          session
-            .results
-            .length,
-
-        promise
-      }
+      entry
     );
   }
 
@@ -4400,8 +5789,16 @@
     }
 
 
+    /* 这一份预取对应的是「用户答完当前这道题之后」的位置，
+       所以题号是 shadow 的长度（= 当前 results.length + 1）。 */
+    const sequence =
+      shadow
+        .results
+        .length;
+
+
     const signature =
-      `${shadow.results.length}:` +
+      `${sequence}:` +
       JSON.stringify(
         plan
       );
@@ -4421,16 +5818,88 @@
     }
 
 
-    const promise =
+    const entry = {
+      request_id:
+        nextRequestId('speculative'),
+
+      session_id:
+        session.id,
+
+      question_sequence:
+        sequence,
+
+      signature,
+
+      resultCount:
+        sequence,
+
+      plan,
+
+      issued:
+        ++prefetchIssued,
+
+      startedAt:
+        Date.now(),
+
+      speculative:
+        true,
+
+      promise: null
+    };
+
+
+    if (
+      !prefetchSupersedes(
+        entry,
+        existing
+      )
+    ) {
+      discardPrefetch(
+        entry,
+        'superseded_by_newer_prefetch'
+      );
+
+      return;
+    }
+
+
+    if (existing) {
+      discardPrefetch(
+        existing,
+        'superseded_by_newer_prefetch'
+      );
+    }
+
+
+    entry.promise =
       generateOneQuestion(
-        plan
+        plan,
+        {
+          request_id:
+            entry.request_id,
+
+          session_id:
+            session.id,
+
+          question_sequence:
+            sequence
+        }
       )
         .then(
           nextQuestion => ({
             question:
               nextQuestion,
 
-            plan
+            plan,
+
+            request_id:
+              entry.request_id,
+
+            session_id:
+              session.id,
+
+            question_sequence:
+              sequence
           })
         )
         .catch(
@@ -4447,16 +5916,7 @@
 
     sessionPrefetch.set(
       session.id,
-      {
-        signature,
-
-        resultCount:
-          shadow
-            .results
-            .length,
-
-        promise
-      }
+      entry
     );
   }
 
@@ -4540,9 +6000,12 @@
     expectedPlan =
       null
   ) {
+    const key =
+      session?.id;
+
     const cached =
       sessionPrefetch.get(
-        session?.id
+        key
       );
 
 
@@ -4551,23 +6014,101 @@
     }
 
 
-    sessionPrefetch.delete(
-      session.id
-    );
+    /* 只删除「我要取的那一条」。如果这中间已经有更新的请求写进来了，
+       删掉它等于把用户本来能马上拿到的新题也一起扔了。 */
+    if (
+      sessionPrefetch.get(
+        key
+      )?.request_id ===
+      cached.request_id
+    ) {
+      sessionPrefetch.delete(
+        key
+      );
+    }
+
+
+    if (
+      cached.session_id !==
+      key
+    ) {
+      return discardPrefetch(
+        cached,
+        'session_mismatch'
+      );
+    }
 
 
     if (
       cached.resultCount !==
       session
         .results
+        .length ||
+      cached.question_sequence !==
+      session
+        .results
         .length
     ) {
-      return null;
+      return discardPrefetch(
+        cached,
+        'sequence_advanced_before_wait'
+      );
+    }
+
+
+    if (session.completed) {
+      return discardPrefetch(
+        cached,
+        'session_completed_before_wait'
+      );
     }
 
 
     const value =
       await cached.promise;
+
+
+    /* ★ 最重要的一次核对：await 之前题目对得上，不代表 await 之后还对得上。
+       模型返回要 10~40 秒，用户在这段时间里完全可能已经交卷、切模块、结束会话。
+       只在 await 之前检查，等于假装这段时间不存在 —— 这正是「下一题跳回
+       上一题的题面」「答完题又被塞了一道新题」这类现象的来源。 */
+    const nowCurrent =
+      sessionPrefetch.get(
+        key
+      );
+
+
+    if (
+      nowCurrent &&
+      nowCurrent.request_id !==
+        cached.request_id
+    ) {
+      return discardPrefetch(
+        cached,
+        'superseded_during_wait'
+      );
+    }
+
+
+    if (
+      session
+        .results
+        .length !==
+      cached.question_sequence
+    ) {
+      return discardPrefetch(
+        cached,
+        'sequence_changed_during_wait'
+      );
+    }
+
+
+    if (session.completed) {
+      return discardPrefetch(
+        cached,
+        'session_completed_during_wait'
+      );
+    }
 
 
     if (
@@ -4578,13 +6119,28 @@
 
 
     if (
+      value.request_id &&
+      value.request_id !==
+        cached.request_id
+    ) {
+      return discardPrefetch(
+        cached,
+        'response_request_id_mismatch'
+      );
+    }
+
+
+    if (
       expectedPlan &&
       !plansCompatible(
         value.plan,
         expectedPlan
       )
     ) {
-      return null;
+      return discardPrefetch(
+        cached,
+        'plan_mismatch'
+      );
     }
 
 
@@ -4692,20 +6248,50 @@
     }
 
 
+    const requestId =
+      nextRequestId(
+        'warmup'
+      );
+
+
     warmupPrefetch[
       mode
     ] = {
       fingerprint,
       plan,
 
+      request_id:
+        requestId,
+
+      session_id:
+        null,
+
+      question_sequence:
+        0,
+
+      startedAt:
+        Date.now(),
+
       promise:
         generateOneQuestion(
-          plan
+          plan,
+          {
+            request_id:
+              requestId,
+
+            session_id:
+              null,
+
+            question_sequence:
+              0
+          }
         )
           .then(
             question => ({
               question,
-              plan
+              plan,
+              request_id:
+                requestId
             })
           )
           .catch(
@@ -4761,6 +6347,37 @@
       !value?.question
     ) {
       return null;
+    }
+
+
+    /* Task 5E：预热是「还没开始做题时提前生成第一题」，所以只允许落在
+       一道**还是空的**会话上。await 期间用户可能已经手快开始了这一组、
+       或者已经结束了它 —— 这时把这份预热套上去，等于凭空往一个已经
+       有进度的会话里插一道第一题。 */
+    if (
+      !session ||
+      session.completed
+    ) {
+      return discardPrefetch(
+        cached,
+        'warmup_session_gone'
+      );
+    }
+
+
+    if (
+      session
+        .currentQuestion !==
+        null ||
+      session
+        .results
+        .length !==
+        0
+    ) {
+      return discardPrefetch(
+        cached,
+        'warmup_session_no_longer_empty'
+      );
     }
 
 
@@ -5053,6 +6670,15 @@
     item.bankId =
       question.bankId ||
       null;
+
+
+    /* Task 5D：换题面 = 换了一道题，question_id 和身份指纹必须一起换。
+       指纹按**条目自己**重算，而不是把原题的指纹抄过来 —— 条目少带了任何
+       一个参与指纹的字段（比如 verification.pipeline），抄过来的指纹就会
+       立刻对不上，条目从此一被核对就报「被篡改」。 */
+    freezeQuestion(
+      item
+    );
   }
 
 
@@ -7184,22 +8810,26 @@
   function questionDifficultyLabel(
     question
   ) {
-    // 展示用难度：审核员明确说「与计划的难度不相称，应该是 N」时的修正值，
-    // 是针对这一道题的具体修正，优先级最高。
-    //
-    // 它必须排在 calibratedDifficulty 之前 —— 因为 calibratedDifficulty 是
-    // 生成时用 calibrateDifficulty(provisionalDifficulty) 算出来的，
-    // 在没有足够标定点时原样返回 provisionalDifficulty（见 calibrateDifficulty）。
-    // 也就是说它是同一个 AI 猜测的单调变换，并不比 provisionalDifficulty 更权威。
-    // 把全局变换排在针对本题的修正之前，是把信息量搞反了。
-    //
-    // 注意：这里只改展示。学习模型仍走 calibratedDifficulty 那条链——
-    // displayDifficulty 不参与 content() 快照，也不参与 correctProbability，
-    // 所以改它既不会让题目失效，也不会悄悄改动自适应难度。
+    /* 展示难度 = 生成时定的难度，不再让审核员的 suggested_difficulty 覆盖它。
+
+       Task #4 起关掉这条覆盖，因为线上 50 题评测量出来它跑偏得很厉害：
+       计划 L12 的题被显示成 L3/L4，计划 L10 的显示成 L5 —— 而同一批题的独立
+       评估漂移只有一个难度档。也就是说这不是「审核员更准」，而是这条链路
+       （reviewer 判 difficulty_reasonable=false → suggested_difficulty →
+       displayDifficulty）本身不可靠，把一个高高度的值硬压下来。
+
+       审核员的建议仍然照常记录（displayDifficulty 字段保留在后端响应里，
+       也照常写进 q.metadataCorrection / 服务端日志），只是不参与界面，
+       也不参与 IRT —— 这两件事本来就没走它。等拿到真实用户的作答数据、
+       能对难度做真正的标定之后，再决定要不要启用。
+
+       所以现在的优先级是 calibratedDifficulty → provisionalDifficulty →
+       requestedDifficulty。注意它和下面这条历史注释并不矛盾：calibratedDifficulty
+       在标定点不足时就是 provisionalDifficulty 的单调变换，两者谁先谁后都不改变
+       「这是同一个 AI 猜测」这个事实；但它们都是生成时的判断，比事后被压下来的
+       修正值更接近题目真正该在的位置。 */
     const b =
       Number(
-        question
-          .displayDifficulty ??
         question
           .calibratedDifficulty ??
         question
@@ -7630,11 +9260,42 @@
     const verdict =
       await judgeAnswer(
         q,
-        userAnswer
+        userAnswer,
+        {
+          session_id:
+            session.id,
+
+          question_sequence:
+            session
+              .results
+              .length
+        }
       );
 
 
-    if (state.activeSession !== session || session.currentQuestion !== q) return;
+    /* Task 5E：判题也可能「回来得太晚」。用户在这次判题期间已经交了卷、
+       切了题、甚至结束了这一组题 —— 这时结论不能再往新题上套。
+       （旧代码就有这道闸，这里只是把语义写清楚。） */
+    if (state.activeSession !== session || session.currentQuestion !== q) {
+      diagLog({
+        level: 'info',
+        action: 'judge',
+        event: 'stale_verdict_discarded',
+        kind: FAILURE_KINDS.STALE_RESPONSE,
+        message: '判题结论落地时题目已经换过了',
+        question_id: q?.question_id || q?.id || null,
+        session_id: session.id,
+        question_sequence: session.results.length,
+        outcome: 'discarded'
+      });
+
+      /* 丢弃结论的同时必须把按钮恢复回去 —— 它是在 await 之前被禁用的。
+         只 return 会让界面停在「判题中…」上，用户再也点不动。 */
+      button.disabled = false;
+      button.textContent = '提交答案';
+
+      return;
+    }
 
     if (verdict.trusted !== true || !trustedQuestion(q)) {
       // 处置方式由引擎统一决定：只有「题目本身不可信」才作废，

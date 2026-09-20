@@ -5,6 +5,7 @@ const vm=require('node:vm');
 const {createRequire}=require('node:module');
 const path=require('node:path');
 const Q=require('../math-quality');
+const support=require('../tools/test-support.cjs');
 const draft=()=>({module:'limit',topic:'重要极限',instruction:'计算极限',expression:'\\lim_{x\\to0}\\sin(x)/x',answer:'1',solution:'利用重要极限，结果为 1。'});
 const review=()=>({...Object.fromEntries(Q.fields.map(k=>[k,true])),confidence:.97,issues:[],independent_answer:'1'});
 function approved(q=draft()) {q.verification={...review(),version:Q.VERSION,status:'approved',content:Q.content(q)};q.source='ai';return q;}
@@ -48,7 +49,9 @@ for(const file of ['api/deepseek.js','cloudbase/deepseek/index.js']) {
   assert.equal((await c.judgeAnswer('mock',{question:q,userAnswer:'1/2'})).verdict,'not_equivalent');
   assert.equal(calls,0,'确定性引擎能定的结论不该消耗一次 AI 调用');
   c.callDeepSeek=async()=>({verdict:'uncertain',question_valid:true,confidence:.99});
-  assert.equal((await c.judgeAnswer('mock',{question:approved(),userAnswer:'sin(x)'})).trusted,false);
+  // 必须用一个机器真的判不了的答案。'sin(x)' 在 Task #4 之后会被结构检查算出来
+  // （lim sin(x)/x = 1 ≠ 0），直接由引擎判掉、不再落到模型，测的就不是这条了。
+  assert.equal((await c.judgeAnswer('mock',{question:approved(),userAnswer:'\\Gamma(x)'})).trusted,false);
  });
  test(`${file}: 参考答案本身不满足题目时，判题必须拒绝作答`,async()=>{
   const c=backend(file);let calls=0;c.callDeepSeek=async()=>{calls++;return {verdict:'equivalent',question_valid:true,confidence:.99}};
@@ -64,16 +67,17 @@ for(const file of ['api/deepseek.js','cloudbase/deepseek/index.js']) {
  });
 }
 function appHarness() {
- let s=fs.readFileSync('app.js','utf8');
+ const s=fs.readFileSync('app.js','utf8');
  // Extract real production functions without bootstrapping the UI.
- function fn(name) {const start=s.search(new RegExp('  (?:async )?function '+name+'\\('));const next=s.indexOf('\n  function ',start+1),nextAsync=s.indexOf('\n  async function ',start+1);const ends=[next,nextAsync].filter(x=>x>=0);return s.slice(start,Math.min(...ends));}
+ const fn=support.appSlice(s);
  const elements={answerInput:{value:'1/2'},submitAnswerBtn:{},box:{innerHTML:''},retryQualityBtn:{addEventListener(){}}};
  const records=[];
- // 注意 FallbackBank：judgeAnswer 的切片会一路带到 `const FALLBACK_BANK = ...` 适配层，
- // 而 vm 里顶层 const 会遮蔽沙箱全局，于是 FALLBACK_BANK 变成空数组。
- // 把模块本身喂进去，适配层才能求出真实题库（这也更接近浏览器里的实际环境）。
- const c=vm.createContext({MathQuality:Q,FallbackBank:require('../fallback-bank'),FALLBACK_BANK:require('../fallback-bank').BANK,state:{activeSession:null},$:id=>elements[id],console,localStorage:{getItem:()=>null,setItem:(k,v)=>records.push(v)},window:{dispatchEvent(){}},CustomEvent:function(){},toast(){},markApiRequestFailure(){},markApiRequestSuccess(){},apiCall:async()=>{throw Error('network')},saveState(){},ensureCurrentQuestion(){},document:{}});
- for(const name of ['trustedQuestion','reportQuestionIssue','voidQuestion','judgeUnavailable','judgeAnswer','submitCurrentAnswer','generateOneQuestion'])vm.runInContext(fn(name),c);
+ // 注意 FallbackBank：切片按「下一个顶层声明」断开，`const FALLBACK_BANK = ...`
+ // 适配层不会被带进来，但 judgeAnswer / trustedQuestion 都要用它。
+ // 把模块本身喂进去（也更接近浏览器里的实际环境）。
+ // apiProtocol 是 app.js 顶层的 let（Task 5I），切片函数会读它 —— 沙箱里补一个。
+ const c=vm.createContext({MathQuality:Q,FallbackBank:require('../fallback-bank'),FALLBACK_BANK:require('../fallback-bank').BANK,...support.diagContextBits(s),state:{activeSession:null},$:id=>elements[id],console,localStorage:{getItem:()=>null,setItem:(k,v)=>records.push(v)},window:{dispatchEvent(){}},CustomEvent:function(){},toast(){},markApiRequestFailure(){},markApiRequestSuccess(){},apiCall:async()=>{throw Error('network')},saveState(){},ensureCurrentQuestion(){},document:{}});
+ for(const name of [...support.DIAG_FUNCTIONS,'nextRequestId','apiFailureKind','clientPipeline','pipelineMismatch','checkResponseProtocol','knownProtocolMismatch','freezeQuestion','canonicalIntegrityOf','discardPrefetch','trustedQuestion','reportQuestionIssue','voidQuestion','judgeUnavailable','judgeAnswer','submitCurrentAnswer','generateOneQuestion'])vm.runInContext(fn(name),c);
  return {c,elements,records};
 }
 test('题目不可信时作废该题，且不写入任何学习记录',async()=>{

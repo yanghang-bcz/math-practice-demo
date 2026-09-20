@@ -1,0 +1,3 @@
+后端未升级：health 响应缺少 protocol_version / pipeline。
+health = {"ok":true,"service":"deepseek","adaptiveDifficultyModel":"v0-provisional"}
+若要有意测旧版基线，请加 --allow-old-server。

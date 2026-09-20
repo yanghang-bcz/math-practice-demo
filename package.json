@@ -5,12 +5,19 @@
     "test": "node --test tests/*.cjs",
     "test:engine": "node --test tests/math-engine.cjs",
     "test:bank": "node --test tests/fallback-bank.cjs",
+    "test:audit": "node --test tests/fallback-audit.cjs",
     "test:wiring": "node --test tests/wiring.cjs",
     "test:reliability": "node --test tests/reliability.cjs",
     "test:pipeline": "node --test tests/pipeline-v3.cjs",
     "sync:engine": "cp math-quality.js cloudbase/deepseek/math-quality.js",
     "check:sync": "node tools/check-sync.mjs",
-    "verify:browser": "zsh tools/browser-verify/run.sh"
+    "verify:browser": "zsh tools/browser-verify/run.sh",
+    "smoke": "node tools/smoke/run.mjs",
+    "smoke:compare": "node tools/smoke/compare.mjs",
+    "smoke:matrix": "node -e \"import('./tools/smoke/matrix.mjs').then(m=>console.log(m.matrixSize()+' questions'))\"",
+    "probe:local": "node tools/smoke/judge-probe-local.mjs",
+    "sync:backend": "node tools/sync-backend.mjs",
+    "sync": "npm run sync:engine && npm run sync:backend"
   },
   "dependencies": {
     "mathjax": "^3.2.2"

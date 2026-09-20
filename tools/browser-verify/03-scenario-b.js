@@ -11,6 +11,8 @@
   const q = s && s.currentQuestion;
 
   ck('判题确实走了服务端', window.__mock.calls.includes('judge'), window.__mock.calls.join(','));
+  ck('这次作答本地引擎确实判不了（结论必须来自服务端）',
+    window.__mock.judgeBodies.length === 1, window.__mock.judgeBodies.length);
 
   // ── 措辞：标准答案有问题 ≠ 题目异常 ──
   ck('界面说明「标准答案存在问题」', html.includes('标准答案存在问题'));

@@ -7,13 +7,7 @@ module.exports = async function handler(req, res) {
 
     return res
       .status(configured ? 200 : 503)
-      .json({
-        ok: configured,
-        service: 'deepseek',
-        adaptiveDifficultyModel: 'v0-provisional',
-        protocol_version: PIPELINE.protocol,
-        pipeline: versions()
-      });
+      .json(healthPayload(configured));
   }
 
   if (req.method !== 'POST') {
@@ -101,6 +95,46 @@ function versions() {
 }
 
 
+/* Task 5E / 5I：把「这次请求是谁」和「服务端跑的是哪一版」一起回显给客户端。
+
+   客户端据此做两件事：
+     · request_id 对不上 → 这个响应不属于这次请求（乱序 / 代理缓存 / 多实例串号），
+       直接当失败处理，不能把它当成这一题的题面；
+     · versions 对不上 → 前端不该采信这个响应，尤其不该采信它的「答对了」结论。
+   
+   放在分发这一层，是为了让每个 action 的返回值都自动带上 —— 少一处手写，
+   就少一处将来会忘记的地方。 */
+function withResponseMeta(result, body) {
+  return {
+    ...result,
+    request_id: body?.request_id ?? null,
+    session_id: body?.session_id ?? null,
+    question_sequence: body?.question_sequence ?? null,
+    versions: result?.versions || versions()
+  };
+}
+
+/* health 的响应体放在业务段里，两份后端共用同一个实现。
+   以前它写在传输层，于是「改了一份忘了另一份」时，前端拿到的指纹可能来自
+   另一个版本 —— 而指纹正是用来判断「线上到底跑的是哪一版」的，这不自相矛盾才怪。
+
+   Task 5I：五个版本号都平铺出来，前端据此判定协议兼容性，
+   不能再只显示一句「AI 已连接」就了事。 */
+function healthPayload(configured) {
+  return {
+    ok: Boolean(configured),
+    service: 'deepseek',
+    adaptiveDifficultyModel: 'v0-provisional',
+    protocol_version: PIPELINE.protocol,
+    generator_version: PIPELINE.generator,
+    reviewer_version: PIPELINE.reviewer,
+    judge_version: PIPELINE.judge,
+    math_engine_version: PIPELINE.math_engine,
+    pipeline: versions()
+  };
+}
+
+
 /*
 =========================================================
 DeepSeek request：超时 / 重试 / 退避 / 错误分类
@@ -108,20 +142,37 @@ DeepSeek request：超时 / 重试 / 退避 / 错误分类
 只有「再试一次可能成功」的错误才重试 —— 429、5xx、网络中断、超时。
 参数错误、鉴权失败、返回体不是 JSON，重试多少次都一样，直接抛。
 
-预算：客户端对 generate 的超时是 190s，而 generateQuestions 外层已有 2 次尝试。
-所以生成链路内层不再重试，否则 4 次模型调用会把预算顶死；
+预算（Task 5F 重新核定）：以前客户端的 generate 超时是 190s，这个数字不是
+算出来的，是照着「两次生成 + 两次复核」的最坏情况配出来的。它的代价是：
+真的走到那一步时，用户对着「正在准备题目…」等三分多钟，而这段时间里
+已校验的备用题库本来可以立刻兜住。
+
+现在按「一次往返的真实耗时」定预算，客户端再乘上它自己的重试次数：
+
+  generate  25s   单题草稿生成，模型典型 8~15s
+  review    18s   复核是一次短调用（只回一个 JSON）
+  judge     20s   判题预算收在 20s，客户端的判题超时是 22s —— 客户端的
+                  重试因此总是发生在服务端已经放弃之后，不会出现
+                  「服务端还在算、客户端已经重试、同一道题被算两遍」
+  evaluate  12s   难度标定，失败不影响出题（有 provisional 兜底）
+
+内层重试与外层重试的分工：generateQuestions 外层已有 2 次尝试（闸门拒稿时
+重来一次），所以生成链路内层不再重试，否则 4 次模型调用会把预算顶死。
 判题、评估这类短调用才允许内层重试。
+
+judge 的内层重试从 2 次收成 1 次：客户端（Task 5F）现在会自动重试一次，
+两层都重试等于同一道题最多算 4 次。
 =========================================================
 */
 
 const CALL_POLICY = {
-  generate: { attempts: 1, timeoutMs: 40000, backoffMs: 0 },
-  review: { attempts: 2, timeoutMs: 35000, backoffMs: 800 },
-  judge: { attempts: 2, timeoutMs: 20000, backoffMs: 500 },
-  evaluate: { attempts: 2, timeoutMs: 20000, backoffMs: 500 }
+  generate: { attempts: 1, timeoutMs: 25000, backoffMs: 0 },
+  review: { attempts: 2, timeoutMs: 18000, backoffMs: 800 },
+  judge: { attempts: 1, timeoutMs: 20000, backoffMs: 0 },
+  evaluate: { attempts: 2, timeoutMs: 12000, backoffMs: 500 }
 };
 
-const DEFAULT_POLICY = { attempts: 1, timeoutMs: 45000, backoffMs: 0 };
+const DEFAULT_POLICY = { attempts: 1, timeoutMs: 25000, backoffMs: 0 };
 
 function policyFor(label) {
   return CALL_POLICY[label] || DEFAULT_POLICY;
@@ -421,8 +472,8 @@ ${common}
     return `
 模块：导数。
 可使用的难度来源包括但不限于：
-复合函数、隐函数、参数方程、高阶导数、对数求导、
-多层链式结构、复杂乘除组合、局部结构识别。
+复合函数、多层链式结构、对数求导、复杂乘除组合、幂指函数、
+局部结构识别、以及需要先化简再求导的形态。
 高等级应增加方法识别和结构深度，而不是单纯堆运算。
 ${common}
 `;
@@ -527,6 +578,35 @@ ${planText}
 - 与上述范围无关的内容
 - 纯证明题
 - 无明确答案的开放题
+
+【可验证性要求 —— 最重要的一条，违反即被闸门拒稿】
+
+每道题的标准答案都会被一个**确定性数学引擎**独立复核（数值求导/采样取极限）。
+凡是引擎读不懂的题干形态，题目一律会被拒，出题机会直接浪费。
+所以下面这些形态**禁止生成**：
+
+极限模块禁止：
+- 含 \\sum 求和号且 n\\to\\infty 的数列极限 / 黎曼和
+- 分段定义、取整函数、需要先求和才能取极限的形态
+
+导数模块禁止：
+- 用 \\begin{cases} 写的分段函数
+- 隐函数方程（如 x^2+xy+y^2=1 求 dy/dx）
+- 参数方程（如 x=t-\\sin t, y=1-\\cos t）
+- 三阶及以上高阶导数
+- 在 expression 里附写求值点（如 "y=\\ln(1+x^2), y''(1)"）；要考求值就单独说明，
+  不要在表达式里混入 \\quad y''(1) 这类文字
+
+积分模块禁止：
+- 被积函数写不成初等函数表达式的形态（正常的换元、分部、有理函数、三角有理式都可以）
+
+【正确写法示例】
+- 极限：\\lim_{x\\to0}\\frac{\\sin 3x}{2x}、\\lim_{x\\to\\infty}\\frac{2x+1}{x-3}
+- 导数：y=\\ln(1+x^2)、y=\\frac{x}{\\sqrt{1+x^2}}
+- 积分：\\int x e^x\\,dx、\\int \\frac{1}{x^2+4}\\,dx、\\int \\frac{dx}{1+\\sin x+\\cos x}
+
+这些形态已经覆盖考研高数计算题的绝大多数。
+**难度请靠方法识别、技巧深度、知识耦合来堆，不要靠引入引擎读不懂的表述方式。**
 
 【手机端显示规则，非常重要】
 必须把“文字说明”和“数学表达式”分开返回：
@@ -901,6 +981,8 @@ async function reviewQuestion(apiKey, body) {
       version: Quality.VERSION,
       pipeline: versions(),
       status: 'rejected',
+      state: Quality.GATE.REJECTED,
+      tier: Quality.verificationProfile(q || {}).tier,
       gate: 'hard',
       issues: localIssues,
       reviewer_notes: [],
@@ -916,11 +998,20 @@ async function reviewQuestion(apiKey, body) {
 
   const hard = evaluateHardReview(review, q);
 
+  // 形态分级：引擎到底有没有能力独立复核这道题的 canonical answer。
+  // 它不影响审核员的判定，只决定闸门最终给 VERIFIED 还是 UNCERTAIN（Task 5B/5C）。
+  const profile = Quality.verificationProfile(q);
+
   return {
     ...review,
     version: Quality.VERSION,
     pipeline: versions(),
     status: hard.ok ? 'approved' : 'rejected',
+    state: hard.ok
+      ? (profile.tier === Quality.TIER.C ? Quality.GATE.UNCERTAIN : Quality.GATE.VERIFIED)
+      : Quality.GATE.REJECTED,
+    tier: profile.tier,
+    shape: profile.reason,
     gate: 'hard',
     hard_fields: hard.fields,
     // issues 只放「能拒稿的理由」，全是可枚举的字符串，不是模型的自由文本。
@@ -1023,7 +1114,9 @@ function applyMetadataCorrection(q, verification) {
 async function generateQuestions(apiKey, body) {
   const attempts = 2;
   const rejections = [];
+  const startedAt = Date.now();
   let lastError;
+  let lastState = null;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
@@ -1037,6 +1130,8 @@ async function generateQuestions(apiKey, body) {
         q.model = 'deepseek-v4-flash';
         q.generator_prompt_version = PIPELINE.generator;
         q.review_prompt_version = PIPELINE.reviewer;
+        q.judge_prompt_version = PIPELINE.judge;
+        q.math_engine_version = PIPELINE.math_engine;
         q.status = 'draft';
 
         q.verification = await reviewQuestion(apiKey, {
@@ -1044,18 +1139,38 @@ async function generateQuestions(apiKey, body) {
           plan: body.plans?.[0]
         });
 
-        if (!Quality.approved(q)) {
-          const reasons = q.verification?.issues || ['UNKNOWN'];
+        /* Task 5C：闸门由「schema + 确定性验证/矛盾检测 + 答案解析一致性 +
+           reviewer」共同决定，结论是三态。
+
+           注意这里用的是 gateDecision 而不是 approved —— 后者对 Tier C
+           （引擎验不了的形态）是放行的，那是判题阶段的口径。
+           生成阶段只有 VERIFIED 才算过：UNCERTAIN 意味着「我们没验证过」，
+           不能靠模型自己的话把它当高可信题发给学生。 */
+        const decision = Quality.gateDecision(q);
+
+        if (!decision.ok) {
+          const reasons = decision.issues || [decision.code || 'UNKNOWN'];
+          const unverified = decision.state === Quality.GATE.UNCERTAIN;
 
           rejections.push(reasons);
+          lastState = decision.state;
 
           console.warn(JSON.stringify({
             event: 'generation_gate_rejected',
+            // 请求身份：日志里没有它，就无法把一条失败对应回用户那一次点击
+            request_id: body.request_id ?? null,
+            session_id: body.session_id ?? null,
+            question_sequence: body.question_sequence ?? null,
+            state: decision.state,
+            tier: decision.tier ?? q.verification?.tier ?? null,
+            code: decision.code ?? null,
+            shape_reason: decision.reason ?? null,
             attempt,
+            attempts,
             question_id: q.question_id,
             module: q.module,
-            requested_difficulty: body.plans?.[0]?.targetDifficulty ?? null,
             topic: q.topic,
+            requested_difficulty: body.plans?.[0]?.targetDifficulty ?? null,
             expression: q.expression,
             answer: q.answer,
             reasons,
@@ -1064,12 +1179,19 @@ async function generateQuestions(apiKey, body) {
             versions: versions()
           }));
 
-          throw new Error(
+          const error = new Error(
             'Question quality gate rejected draft: ' + reasons.join(',')
           );
+
+          error.code = unverified ? 'GENERATION_UNVERIFIED' : 'GENERATION_REJECTED';
+          error.gateState = decision.state;
+          error.tier = decision.tier ?? null;
+          throw error;
         }
 
         q.status = 'approved';
+        q.verification_state = decision.state;
+        q.verification_tier = decision.tier;
         applyMetadataCorrection(q, q.verification);
       }
 
@@ -1077,7 +1199,13 @@ async function generateQuestions(apiKey, body) {
 
       console.log(JSON.stringify({
         event: 'generation_approved',
+        request_id: body.request_id ?? null,
+        session_id: body.session_id ?? null,
+        question_sequence: body.question_sequence ?? null,
+        state: approved?.verification_state ?? null,
+        tier: approved?.verification_tier ?? null,
         attempt,
+        attempts,
         question_id: approved?.question_id,
         module: approved?.module,
         topic: approved?.topic,
@@ -1092,6 +1220,8 @@ async function generateQuestions(apiKey, body) {
       return {
         ...result,
         attempts: attempt,
+        gate_state: approved?.verification_state ?? null,
+        tier: approved?.verification_tier ?? null,
         versions: versions()
       };
 
@@ -1103,9 +1233,38 @@ async function generateQuestions(apiKey, body) {
   }
 
   const error = lastError || new Error('Question quality gate failed');
-  error.code = error.code || 'GENERATION_REJECTED';
+
+  /* 拒稿原因分成两类，前端据此决定「换一道重试」还是「直接退备用题」：
+       GENERATION_UNVERIFIED  引擎验不了 → 重试同一难度大概率还是验不了
+       GENERATION_REJECTED    数学上明确有问题 → 重试有意义 */
+  if (!error.code) {
+    error.code = lastState === Quality.GATE.UNCERTAIN
+      ? 'GENERATION_UNVERIFIED'
+      : 'GENERATION_REJECTED';
+  }
+
+  error.gateState = lastState;
   error.rejectionReasons = rejections.flat();
   error.versions = versions();
+
+  /* 两次都没过闸门 —— 这是出题链路最终的失败点，必须留下一条带请求身份、
+     失败分类和耗时预算的记录。没有它，线上只能看到前端说了一句
+     「AI 出题失败」，却分不清是闸门拒稿、超时还是网络。 */
+  console.warn(JSON.stringify({
+    event: 'generation_failed',
+    request_id: body.request_id ?? null,
+    session_id: body.session_id ?? null,
+    question_sequence: body.question_sequence ?? null,
+    code: error.code,
+    attempts,
+    module: body.plans?.[0]?.module ?? null,
+    requested_difficulty: body.plans?.[0]?.targetDifficulty ?? null,
+    reasons: rejections.flat(),
+    message: error.message,
+    status: error?.statusCode ?? null,
+    latency_ms: Date.now() - startedAt,
+    versions: versions()
+  }));
 
   throw error;
 }
@@ -1128,7 +1287,9 @@ async function generateQuestions(apiKey, body) {
 =========================================================
 */
 
-const JUDGE_VERDICTS = ['equivalent', 'not_equivalent', 'uncertain', 'canonical_suspected'];
+/* 判题员的结论词表：equivalent / not_equivalent / uncertain / canonical_suspected。
+   （词表本身不再单独声明常量 —— 可采信性统一由 Quality.trustModelVerdict 决定，
+   多一份常量就多一处会漂移的口径。） */
 
 const JUDGE_CONFIDENCE_FLOOR = 0.9;
 
@@ -1172,9 +1333,57 @@ function judgeFeedback(verdict) {
   return JUDGE_FEEDBACK[verdict] || '';
 }
 
+/* 判题失败的分类（Task 5H 的 failure taxonomy）。
+   分类的唯一目的是让线上能一眼分清「网络抖了」和「模型给不出结论」——
+   这两种情况对用户的处置完全不同（前者重试，后者重试也没用）。 */
+function judgeFailureCode(error) {
+  const code = String(error?.code || '');
+  const name = String(error?.name || '');
+  const status = Number(error?.statusCode);
+
+  if (code === 'UPSTREAM_TIMEOUT' || name === 'TimeoutError' || name === 'AbortError') {
+    return 'JUDGE_TIMEOUT';
+  }
+
+  if (code === 'UPSTREAM_PROTOCOL_ERROR' || code === 'UPSTREAM_EMPTY_CONTENT') {
+    return 'JUDGE_PROTOCOL_ERROR';
+  }
+
+  if (code === 'UPSTREAM_UNREACHABLE' || name === 'TypeError') {
+    return 'JUDGE_NETWORK_ERROR';
+  }
+
+  if (Number.isInteger(status) && status >= 500) return 'JUDGE_NETWORK_ERROR';
+  if (Number.isInteger(status) && status === 429) return 'JUDGE_NETWORK_ERROR';
+
+  return 'JUDGE_NETWORK_ERROR';
+}
+
 async function judgeAnswer(apiKey, body) {
   const q = body.question;
   const userAnswer = body.userAnswer;
+  const attemptId = require('crypto').randomUUID();
+  const startedAt = Date.now();
+
+  /* 单次 attempt 的完整记录。写日志是一件事，但「日志里到底该有什么」
+     必须是固定的 —— 否则线上出问题时才发现缺了关键字段，
+     那就得重现一次故障才能补上。字段清单见 Task 5H。 */
+  const logAttempt = extra => {
+    console.log(JSON.stringify({
+      event: 'judge_attempt',
+      attempt_id: attemptId,
+      request_id: body.request_id ?? null,
+      session_id: body.session_id ?? null,
+      question_sequence: body.question_sequence ?? null,
+      question_id: q?.question_id || q?.id || null,
+      module: q?.module ?? null,
+      canonical_answer: q?.answer ?? null,
+      user_answer: typeof userAnswer === 'string' ? userAnswer.slice(0, 200) : null,
+      latency_ms: Date.now() - startedAt,
+      versions: versions(),
+      ...extra
+    }));
+  };
 
   if (!q || typeof userAnswer !== 'string' || !userAnswer.trim()) {
     return {
@@ -1197,15 +1406,29 @@ async function judgeAnswer(apiKey, body) {
   }
 
   // 确定性引擎能定的结论，绝不消耗一次模型调用。
-  const decision = Quality.compare(userAnswer, q.answer);
+  //
+  // Task #4 起这里换成 judgeDeterministic：先标量比较，再结构检查。
+  // 以前只走 compare()，而 compare 只认纯标量（数字、分数、±∞、不存在），
+  // 任何表达式形态都会返回 uncertain 被漏给模型 —— 于是 "2\left(\frac{1}{6}\right)"
+  // 这种「参考答案外面套一个系数」的错答，模型有一半会判成等价。
+  // 现在这类形态由引擎自己判死，不再进模型。
+  const decision = Quality.judgeDeterministic(q, userAnswer);
 
-  if (decision !== 'uncertain') {
+  if (decision.verdict !== 'uncertain') {
+    logAttempt({
+      deterministic_result: decision.verdict,
+      judge_layer: decision.layer,
+      judge_verdict: decision.verdict,
+      trusted: true
+    });
+
     return {
-      verdict: decision,
-      correct: decision === 'equivalent',
+      verdict: decision.verdict,
+      correct: decision.verdict === 'equivalent',
       trusted: true,
       method: 'deterministic',
-      feedback: judgeFeedback(decision),
+      judge_layer: decision.layer,
+      feedback: judgeFeedback(decision.verdict),
       versions: versions()
     };
   }
@@ -1229,12 +1452,18 @@ async function judgeAnswer(apiKey, body) {
   } catch (error) {
     // 判题服务不可用 ≠ 题目有问题。
     // 把原因原样传给前端，前端据此提示「重试」而不是「题目异常」。
+    const failure = judgeFailureCode(error);
+
     console.warn(JSON.stringify({
       event: 'judge_unavailable',
+      failure,
+      attempt_id: attemptId,
       question_id: q.question_id || q.id || null,
+      user_answer: typeof userAnswer === 'string' ? userAnswer.slice(0, 200) : null,
       code: error?.code || 'UPSTREAM_ERROR',
       status: error?.statusCode ?? null,
       message: error?.message,
+      latency_ms: Date.now() - startedAt,
       versions: versions()
     }));
 
@@ -1243,6 +1472,7 @@ async function judgeAnswer(apiKey, body) {
       trusted: false,
       correct: null,
       reason: 'judge_unavailable',
+      failure,
       code: error?.code || 'UPSTREAM_ERROR',
       versions: versions()
     };
@@ -1260,14 +1490,27 @@ async function judgeAnswer(apiKey, body) {
 
   console.log(JSON.stringify({
     event: 'judge_ai_result',
+    attempt_id: attemptId,
+    request_id: body.request_id ?? null,
+    session_id: body.session_id ?? null,
+    question_sequence: body.question_sequence ?? null,
     question_id: q.question_id || q.id || null,
     verdict,
     confidence,
     reason: typeof r?.reason === 'string' ? r.reason.slice(0, 300) : null,
+    latency_ms: Date.now() - startedAt,
     versions: versions()
   }));
 
   if (verdict === 'canonical_suspected') {
+    logAttempt({
+      deterministic_result: 'uncertain',
+      judge_layer: 'model',
+      judge_verdict: 'canonical_suspected',
+      judge_reason: 'canonical_suspected',
+      trusted: false
+    });
+
     return {
       verdict: 'canonical_suspected',
       trusted: false,
@@ -1278,19 +1521,77 @@ async function judgeAnswer(apiKey, body) {
     };
   }
 
-  const trusted =
-    ['equivalent', 'not_equivalent'].includes(verdict) &&
-    confidence !== null &&
-    confidence >= JUDGE_CONFIDENCE_FLOOR;
+  /* 模型的权力被限制在「否」这一个方向上（Task #4 · C）。
+
+     规则写在引擎里（Quality.trustModelVerdict），前后端共用同一条：
+     模型说 not_equivalent 且置信度够 → 采信为「错」；
+     模型说 equivalent → 一律不采信。
+
+     为什么不对称：错答被判对会污染能力模型和复习队列，而且用户永远不知道；
+     对答被判「暂时无法判定」只是让用户再提交一次。两边的代价差一个量级，
+     所以确定性与结构检查都给不出结论时，宁可承认机器判不了。
+     这也是「错答放行率压到 0」这条验收标准的结构性保证：
+     现在能返回 correct:true 的路径只剩确定性引擎一条。 */
+  const modelTrust = Quality.trustModelVerdict(verdict, confidence, JUDGE_CONFIDENCE_FLOOR);
+
+  if (modelTrust) {
+    logAttempt({
+      deterministic_result: 'uncertain',
+      judge_layer: 'model',
+      judge_verdict: modelTrust.verdict,
+      judge_reason: 'ok',
+      judge_confidence: confidence,
+      trusted: true
+    });
+
+    return {
+      verdict: modelTrust.verdict,
+      correct: false,
+      trusted: true,
+      method: 'ai',
+      judge_layer: 'model',
+      reason: 'ok',
+      confidence,
+      feedback: judgeFeedback(modelTrust.verdict),
+      versions: versions()
+    };
+  }
+
+  // 不采信。两种情形分开打日志，否则线上分不清「模型说等价被拦下」和
+  // 「模型自己就没结论」——前者是能力边界，后者可能是提示词出了问题。
+  const untrustedDetail =
+    verdict === 'equivalent' ? 'equivalent_cannot_upgrade' : 'insufficient_confidence';
+
+  console.log(JSON.stringify({
+    event: 'judge_model_untrusted',
+    attempt_id: attemptId,
+    question_id: q.question_id || q.id || null,
+    verdict,
+    confidence,
+    detail: untrustedDetail,
+    versions: versions()
+  }));
+
+  logAttempt({
+    deterministic_result: 'uncertain',
+    judge_layer: 'model',
+    judge_verdict: 'uncertain',
+    judge_reason: 'judge_uncertain',
+    judge_detail: untrustedDetail,
+    judge_confidence: confidence,
+    trusted: false
+  });
 
   return {
-    verdict: trusted ? verdict : 'uncertain',
-    correct: trusted ? verdict === 'equivalent' : null,
-    trusted,
+    verdict: 'uncertain',
+    correct: null,
+    trusted: false,
     method: 'ai',
-    reason: trusted ? 'ok' : (JUDGE_VERDICTS.includes(verdict) ? 'low_confidence' : 'judge_uncertain'),
+    judge_layer: 'model',
+    reason: 'judge_uncertain',
+    detail: untrustedDetail,
     confidence,
-    feedback: trusted ? judgeFeedback(verdict) : '',
+    feedback: '',
     versions: versions()
   };
 }

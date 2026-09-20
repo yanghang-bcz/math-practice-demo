@@ -20,7 +20,9 @@
   ck('界面没有出现「标准答案存在问题」', !html.includes('标准答案存在问题'));
 
   // ── 用户的作答必须保住 ──
-  ck('输入框里保留了用户写下的答案', input && input.value === 'sin(x)', input && JSON.stringify(input.value));
+  // 提交的答案刻意选 'sinx'：本地确定性引擎对它给不出结论（既不是常量也
+  // 不是可解析表达式），所以结论必须来自服务端 —— 这正是本场景要测的那条路。
+  ck('输入框里保留了用户写下的答案', input && input.value === 'sinx', input && JSON.stringify(input.value));
   ck('提交按钮回到可点状态', button && button.disabled === false, button && button.disabled);
   ck('按钮文案提示可以重试', button && button.textContent.trim() === '重试提交', button && button.textContent.trim());
 

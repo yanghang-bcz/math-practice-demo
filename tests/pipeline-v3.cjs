@@ -38,8 +38,14 @@ const plain = value => JSON.parse(JSON.stringify(value));
 
 const DEPLOYMENTS = ['api/deepseek.js', 'cloudbase/deepseek/index.js'];
 
-/* 会走 AI 判题的输入：确定性引擎对 sin(x) vs 1 无解，必然落到模型。 */
-const UNCERTAIN = 'sin(x)';
+const support = require('../tools/test-support.cjs');
+
+/* 会走 AI 判题的输入 —— 必须是**机器真的判不了**的形态。
+   这里原来是 'sin(x)'（对答案 1 而言 "无解"）。Task #4 之后结构检查能算出来
+   lim sin(x)/x = 1 ≠ sin(0) = 0，于是它由引擎直接判 not_equivalent、不再落到模型 ——
+   这本身正是 Task #4 要的收益，但夹具得跟着换成真正够不着的形态。
+   引擎解析不出 Γ 函数，只能交给模型。 */
+const UNCERTAIN = '\\Gamma(x)';
 
 const draft = () => ({
   module: 'limit',
@@ -274,9 +280,33 @@ for (const file of DEPLOYMENTS) {
     assert.ok(!body.includes('利用重要极限'), '解析被塞进判题上下文了 —— 模型会被带偏');
     assert.ok(!/"solution"/.test(body), '判题上下文里不该出现 solution 字段');
 
-    // 反馈必须是固定文案。只要允许模型自由文本回传，它就有机会写出
-    // 「其实正确答案应该是……」—— 同一道题上就出现了两个「正确答案」。
-    assert.equal(r.feedback, '与参考答案数学等价。');
+    // Task #4 · C：模型不能单独把答案判「对」。
+    // 确定性引擎与结构检查都给不出结论时，模型说等价也只是「可能对」，
+    // 这里必须老老实实返回「暂时无法判定」，而不是采纳成 correct:true。
+    assert.equal(r.verdict, 'uncertain', '模型的对判不得单独升级为可信结论');
+    assert.equal(r.trusted, false);
+    assert.equal(r.correct, null, '绝不能把模型说的 equivalent 变成 correct:true');
+    assert.equal(r.feedback, '', '都不采信了，就不该再回传任何反馈文案');
+    assert.equal(r.detail, 'equivalent_cannot_upgrade', '要留下可归因的标记，别让线上分不清是哪种不采信');
+  });
+
+  test(`${file}: 模型说「不等价」可以采信，说「等价」不行`, async () => {
+    const c = backend(file);
+
+    // 否的方向是安全的：错答被判错，代价只是用户重做一次。
+    c.callDeepSeek = async () => ({ verdict: 'not_equivalent', confidence: 0.97 });
+    const wrong = await c.judgeAnswer('mock', { question: approved(), userAnswer: UNCERTAIN });
+    assert.equal(wrong.verdict, 'not_equivalent');
+    assert.equal(wrong.trusted, true);
+    assert.equal(wrong.correct, false);
+    assert.equal(wrong.method, 'ai');
+    assert.equal(wrong.feedback, '与参考答案不等价。');
+
+    // 置信度不够时两个方向都不采信。
+    c.callDeepSeek = async () => ({ verdict: 'not_equivalent', confidence: 0.5 });
+    const low = await c.judgeAnswer('mock', { question: approved(), userAnswer: UNCERTAIN });
+    assert.equal(low.trusted, false);
+    assert.equal(low.verdict, 'uncertain');
   });
 
   test(`${file}: judge 的 system 提示必须明令禁止重新求解`, () => {
@@ -396,10 +426,12 @@ for (const file of DEPLOYMENTS) {
       };
     };
 
+    /* judge 的内层重试从 2 次收成 1 次（Task 5F）：客户端现在自己会重试一次，
+       两层都重试等于同一道题最多算 4 次，而每次都要用户干等。 */
     const rate = counting(429);
     c.callDeepSeekOnce = rate.fn;
     await assert.rejects(c.callDeepSeek('k', [], 10, 0, 'judge'));
-    assert.equal(rate.calls(), 2, 'judge 策略允许一次重试');
+    assert.equal(rate.calls(), 1, 'judge 内层不再重试，重试交给客户端那一层');
 
     const bad = counting(400);
     c.callDeepSeekOnce = bad.fn;
@@ -492,12 +524,7 @@ function appHarness() {
   const source = read('app.js');
 
   // 从真实 app.js 里切出生产函数，不引导 UI。
-  function fn(name) {
-    const start = source.search(new RegExp('  (?:async )?function ' + name + '\\('));
-    const ends = [source.indexOf('\n  function ', start + 1), source.indexOf('\n  async function ', start + 1)]
-      .filter(x => x >= 0);
-    return source.slice(start, Math.min(...ends));
-  }
+  const fn = support.appSlice(source);
 
   const elements = {
     answerInput: { value: 'sin(x)' },
@@ -508,10 +535,13 @@ function appHarness() {
 
   const reports = [];
 
+  // 判题路径现在会写诊断日志（Task 5H）。日志本身不是这一组测的对象，
+  // 但也不能用桩顶掉 —— 桩一写错，测出来的就不是生产路径了。
   const context = vm.createContext({
     MathQuality: Q,
     FallbackBank: require('../fallback-bank'),
     FALLBACK_BANK: require('../fallback-bank').BANK,
+    ...support.diagContextBits(source),
     state: { activeSession: null },
     $: id => elements[id],
     console: { log() {}, warn() {}, error() {} },
@@ -532,7 +562,10 @@ function appHarness() {
     document: {}
   });
 
-  for (const name of ['trustedQuestion', 'reportQuestionIssue', 'voidQuestion', 'judgeUnavailable', 'judgeAnswer']) {
+  // canonicalIntegrityOf / freezeQuestion 是 Task 5D 加的关卡，判题前必须过；
+  // diagLog / diagJudgeOutcome 是 Task 5H 的日志，判题每条出口都会写。
+  // harness 里漏掉一个，测出来的就不是生产路径了。
+  for (const name of [...support.DIAG_FUNCTIONS, 'nextRequestId', 'apiFailureKind', 'clientPipeline', 'pipelineMismatch', 'checkResponseProtocol', 'knownProtocolMismatch', 'freezeQuestion', 'canonicalIntegrityOf', 'trustedQuestion', 'reportQuestionIssue', 'voidQuestion', 'judgeUnavailable', 'judgeAnswer']) {
     vm.runInContext(fn(name), context);
   }
 
@@ -553,7 +586,7 @@ test('客户端必须原样保留服务端的判题失败原因，不得降级',
 
   for (const [serverReason, expected] of cases) {
     c.apiCall = async () => ({ trusted: false, verdict: 'uncertain', reason: serverReason });
-    const result = await c.judgeAnswer(approved(), 'sin(x)');
+    const result = await c.judgeAnswer(approved(), UNCERTAIN);
     assert.equal(result.reason, expected, `${serverReason} 在客户端被降级了`);
   }
 });
@@ -673,7 +706,7 @@ function reviewHarness() {
     deepClone: value => JSON.parse(JSON.stringify(value))
   });
 
-  for (const name of ['uid', 'topicKey', 'trustedQuestion', 'bindReviewQuestion', 'queueWrongQuestion']) {
+  for (const name of ['uid', 'topicKey', 'freezeQuestion', 'canonicalIntegrityOf', 'trustedQuestion', 'bindReviewQuestion', 'queueWrongQuestion']) {
     vm.runInContext(fn(name), context);
   }
 
@@ -783,7 +816,13 @@ test('历史遗留的复习条目（没带 source/bankId）靠题面比对仍可
   assert.equal(c.trustedQuestion({ ...legacy, answer: '999' }), false);
 });
 
-test('展示层难度必须优先于 AI 生成的临时难度与它的标定变换', () => {
+/* Task #4 · E：暂时关掉审核员的难度覆盖。
+   线上 50 题评测量出来的事实是这条链路本身跑偏 —— 计划 L12 的题被显示成 L3/L4、
+   L10 显示成 L5，而同一批题的独立评估只漂移一个难度档。所以展示难度回到
+   生成时的判断（calibratedDifficulty → provisionalDifficulty → requestedDifficulty），
+   suggested_difficulty 仍然被记录，只是不参与界面。等有了真实作答数据能真正标定
+   难度之后再启用。 */
+test('展示难度不得再用审核员的 suggested_difficulty 覆盖（Task #4 · E）', () => {
   const source = read('app.js');
   const start = source.indexOf('  function questionDifficultyLabel(');
   const end = source.indexOf('\n  function ', start + 1);
@@ -793,16 +832,18 @@ test('展示层难度必须优先于 AI 生成的临时难度与它的标定变�
 
   const label = q => context.questionDifficultyLabel(q);
 
-  // displayDifficulty 是审核员对**这一道题**的修正。
-  assert.equal(label({ provisionalDifficulty: 6, displayDifficulty: 7.5 }), '难度 7.5',
-    '审核员修正过难度，界面必须显示修正后的值');
+  assert.equal(label({ provisionalDifficulty: 6, displayDifficulty: 7.5 }), '难度 6.0',
+    '审核员的修正还在覆盖展示难度 —— 这条覆盖在 Task #4 里是关掉的');
+  assert.equal(label({ calibratedDifficulty: 6, provisionalDifficulty: 6, displayDifficulty: 7.5 }), '难度 6.0',
+    '审核员的修正不得盖过生成时的难度');
 
-  // calibratedDifficulty 只是 calibrateDifficulty(provisionalDifficulty)，
-  // 没有标定点时它就是 provisionalDifficulty 本身，不该压过针对本题的修正。
-  assert.equal(label({ calibratedDifficulty: 6, provisionalDifficulty: 6, displayDifficulty: 7.5 }), '难度 7.5',
-    'AI 自己猜测的单调变换压过了审核员的修正');
-
+  assert.equal(label({ calibratedDifficulty: 8.2, displayDifficulty: 3 }), '难度 8.2',
+    '被压下来的修正值不得再影响界面');
   assert.equal(label({ calibratedDifficulty: 8.2 }), '难度 8.2', '没有修正时用标定值');
   assert.equal(label({ provisionalDifficulty: 6 }), '难度 6.0');
+  assert.equal(label({ requestedDifficulty: 10 }), '难度 10.0', '生成时请求的难度是最后一个兜底');
   assert.equal(label({}), '难度 6.0', '完全没有难度信息时要有兜底');
+
+  // 字段本身必须继续留在响应里（只是不用），否则将来没法靠它做事后分析。
+  assert.ok(source.includes('displayDifficulty:'), 'displayDifficulty 字段的解析被删掉了 —— 它只该退出展示链，不该整个消失');
 });

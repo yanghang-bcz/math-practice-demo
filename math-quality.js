@@ -51,13 +51,40 @@
     GENERATION_REJECTED: 'GENERATION_REJECTED',
     GENERATION_FORMAT_ERROR: 'GENERATION_FORMAT_ERROR',
     VERIFICATION_STALE: 'VERIFICATION_STALE',
+    UNVERIFIED_SHAPE: 'UNVERIFIED_SHAPE',
+    CANONICAL_MUTATED: 'CANONICAL_MUTATED',
     FALLBACK_USED: 'FALLBACK_USED'
   };
+
+  /* 闸门三态（Task 5C）。关键约定：
+       UNCERTAIN 对高风险数学内容 **不等于 APPROVE**。
+     只凭审核员的几个布尔就把「引擎从未独立验证过」的题当高可信题发给学生，
+     正是线上 4/41 错误标准答案的来源。 */
+  const GATE = {
+    VERIFIED: 'VERIFIED',
+    REJECTED: 'REJECTED',
+    UNCERTAIN: 'UNCERTAIN'
+  };
+
+  /* 题目形态分级（Task 5B）：
+       A  结构可读，且确定性验证给出了结论（equivalent / not_equivalent）
+       B  结构可读，但这一次数值不定 —— 矛盾检查跑过了，没发现矛盾
+       C  结构读不懂 —— 引擎没有能力为 canonical 背书
+
+     分级只看「引擎有没有能力验证」，与这一次数值是否收敛无关：
+     同一道 Tier A 形态的题，换个数字可能落到 B，但不会掉到 C。 */
+  const TIER = { A: 'A', B: 'B', C: 'C' };
 
   /* =========================================================
      Normalization + deterministic atom comparison
      ========================================================= */
 
+  /* \frac 的两种 LaTeX 写法都要认：
+       \frac{1}{2}  花括号参数（绝大多数情况）
+       \frac12      教科书速写，两个参数各只占一个 token
+     速写形态在 normalize 里用「单字符 + 单字符」抠，够精确：
+     它不会误吃 \frac1\pi（第二个 token 是反斜杠开头的命令，正则匹配不上），
+     也不会把 \frac{12}{34} 读成 12/34——花括号那条规则先跑，压根轮不到它。 */
   function normalize(v) {
     return String(v ?? '')
       .normalize('NFKC')
@@ -65,7 +92,14 @@
       .replace(/[\u2212\u2013\u2014]/g, '-')
       .replace(/\\(?:left|right)/g, '')
       .replace(/\\(?:dfrac|tfrac|frac)\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1)/($2)')
-      .replace(/\(([+-]?\d+(?:\.\d+)?)\)/g, '$1')
+      .replace(/\\(?:dfrac|tfrac|frac)\s*([0-9A-Za-z])\s*([0-9A-Za-z])/g, '($1)/($2)')
+      // 把 \frac 展开留下的 (a)/(b) 清成 a/b，好让 isExactForm/rational 认得出。
+      //
+      // 但必须看清前面的字符：紧跟在数字/字母/右括号后面的左括号是「乘法」，
+      // 不是「分组」。否则 2(1)/(6) 会被清成 21/6 —— 一个凭空捏造出来的数，
+      // 而且它会把 1(2)/(3) 判成等于 12/3，也就是一次错答被放行。
+      // 剥不干净没关系：那就落回 uncertain，交给结构检查那层去判。
+      .replace(/(?<![\w.)])\(([+-]?\d+(?:\.\d+)?)\)/g, '$1')
       .replace(/\\infty/g, '\u221e')
       .replace(/\\[()[\]]|\$/g, '')
       .replace(/\s+/g, '');
@@ -152,9 +186,77 @@
     return Math.abs(va - vb) <= EPSILON * scale;
   }
 
+  /* 表达式里有没有自变量。只认编译器的符号表：FUNCS 里的函数名和
+     pi / e / Infinity 这些常量之外，任何字母（包括 x）都算「含变量」。
+     这条判断决定 constantAtom 敢不敢把一段表达式当成常量去求值。 */
+  function containsVariable(infix) {
+    const runs = infix.match(/[A-Za-z]+/g) || [];
+
+    for (const run of runs) {
+      if (FUNCS[run]) continue;
+      if (['pi', 'PI', 'e', 'E', 'Infinity', 'inf'].includes(run)) continue;
+      return true;
+    }
+
+    return false;
+  }
+
+  const CONST_PROBES = [0.37, 1.13, -0.61, 2.71, -1.9];
+
+  /* 纯常量表达式 → 数值 —— compare 的最后一层。
+
+     存在的理由：像 2\left(\frac12\right)、sqrt(2)/2、e^2、pi/4 这些写法
+     atom() 一个都不认（它只认裸标量），于是 compare 返回 uncertain，
+     整个判题被推给模型。而模型对「参考答案外面套一个系数」这种形态
+     恰好是最容易判错的 —— 这正是 Task #4 里错答放行的主要来源。
+
+     安全边界（宁可不判也不猜）：
+       · 含变量一律拒绝（x+1、2x 绝不能被当成常量）—— 见 containsVariable；
+       · 在 5 个互不相同的点上求值，必须**处处相同**才认定是常量。
+         这比字符串匹配结实：「x - x + 1」这种伪常量也会被拆穿（它恒等于 1，
+         其实无所谓），而「x^0 + 1」…同样恒等于 2，也确实是常量。真正要拦的
+         是「值随 x 变」的表达式，数值法一测便知；
+       · 任一探针点落在定义域外（NaN/非有限）→ 直接放弃（保守）。 */
+  function constantAtom(v) {
+    const s = normalize(v);
+    if (!s) return null;
+
+    // 裸数字 / 分数 / 百分号不是「表达式形态」，atom() 已经处理过了，早退。
+    if (/^[+\-\d./%e]+$/i.test(s)) return null;
+
+    // 没有数字的式子基本只有 pi / e 裸常量，收益极低，不值得付 tryParse 的成本。
+    if (!/[0-9]/.test(s)) return null;
+
+    let infix;
+    try {
+      infix = toInfix(v, 'x');
+    } catch (error) {
+      return null;
+    }
+
+    if (!infix || infix.includes('=') || containsVariable(infix)) return null;
+
+    const f = tryParse(v, 'x');
+    if (!f) return null;
+
+    let value = null;
+
+    for (const probe of CONST_PROBES) {
+      const current = safeEval(f, probe);
+      if (current === null) return null;
+      if (value === null) { value = current; continue; }
+      if (!closeEnough(current, value, 1e-12)) return null;
+    }
+
+    return value === null ? null : { kind: 'number', value };
+  }
+
   function compare(a, b) {
-    const x = atom(a);
-    const y = atom(b);
+    // 标量比较的最后一层兜底：两个人写的都是纯常量表达式时，先把它们算成数
+    // 再比，而不是原样漏给模型。atom() 认不出的写法（2(1/2)、sqrt(2)/2）
+    // 到这里被就地解决掉。
+    const x = atom(a) || constantAtom(a);
+    const y = atom(b) || constantAtom(b);
 
     if ([x, y].some(z => z && ['ambiguous', 'invalid'].includes(z.kind))) return 'uncertain';
     if (!x || !y) return 'uncertain';
@@ -202,6 +304,26 @@
     return -1;
   }
 
+  /* One \frac argument. LaTeX accepts either a brace-balanced group or a single
+     following token, and both spellings show up in real student answers:
+       \frac{1}{6}        → grouped
+       \frac12(x+1)       → shorthand, i.e. (1)/(2) · (x+1)
+       \frac34x           → shorthand, i.e. (3)/(4) · x
+     The shorthand must take exactly ONE character per argument — reading a digit
+     run would turn \frac12 into (12)/(?) and silently mangle the answer. Anything
+     that is not a group or a single alphanumeric is refused so the caller can
+     leave the raw \frac untouched (which stays 'uncertain', never a wrong verdict). */
+  function readFracArg(t, i) {
+    if (t[i] === '{') {
+      const end = matchBrace(t, i);
+      return end < 0 ? null : { text: t.slice(i + 1, end - 1), end };
+    }
+
+    if (i >= t.length || !/[0-9A-Za-z.]/.test(t[i])) return null;
+
+    return { text: t[i], end: i + 1 };
+  }
+
   /* \frac{A}{B} -> ((A)/(B)), recursively.
    *
    * A naive flat [^{}]* capture breaks on every real high-math answer, because
@@ -230,24 +352,20 @@
       let p = m.index + m[0].length;
       while (t[p] === ' ') p++;
 
-      if (t[p] !== '{') { out += m[0]; i = m.index + m[0].length; continue; }
+      const a = readFracArg(t, p);
+      if (!a) { out += m[0]; i = m.index + m[0].length; continue; }
 
-      const aEnd = matchBrace(t, p);
-      if (aEnd < 0) { out += m[0]; i = m.index + m[0].length; continue; }
-
-      let q = aEnd;
+      let q = a.end;
       while (t[q] === ' ') q++;
 
-      if (t[q] !== '{') { out += m[0]; i = m.index + m[0].length; continue; }
+      const b = readFracArg(t, q);
+      if (!b) { out += m[0]; i = m.index + m[0].length; continue; }
 
-      const bEnd = matchBrace(t, q);
-      if (bEnd < 0) { out += m[0]; i = m.index + m[0].length; continue; }
-
-      const numerator = expandFrac(t.slice(p + 1, aEnd - 1), (depth || 0) + 1);
-      const denominator = expandFrac(t.slice(q + 1, bEnd - 1), (depth || 0) + 1);
+      const numerator = expandFrac(a.text, (depth || 0) + 1);
+      const denominator = expandFrac(b.text, (depth || 0) + 1);
 
       out += '((' + numerator + ')/(' + denominator + '))';
-      i = bEnd;
+      i = b.end;
     }
 
     return out;
@@ -398,6 +516,37 @@
     return -1;
   }
 
+  /* |A| -> abs(A)。目标很具体：|x| 是积分答案里最常见的形态之一
+     （\ln|x|+C、3\ln|x-2|-2\ln|x-1| 这类），而 '|' 在 tokenizer 里是非法字符，
+     于是整条答案直接 unparseable —— 判题只能说「不确定」，白白漏给模型。
+
+     配对规则刻意保守，宁可不解也不猜错：
+       · 竖线个数是奇数 → 写法不规整，整段不动（仍旧 unparseable → 保守）
+       · 配对内容为空（嵌套写法 ||x|-1|）→ 整段不动
+     LaTeX 里嵌套绝对值本身就有歧义（正解是 \lvert/\rvert），去猜它只会猜错。 */
+  function expandAbs(t) {
+    if (!t.includes('|')) return t;
+    if ((t.match(/\|/g) || []).length % 2) return t;
+
+    let out = '';
+    let i = 0;
+
+    while (i < t.length) {
+      if (t[i] !== '|') { out += t[i]; i++; continue; }
+
+      const close = t.indexOf('|', i + 1);
+      if (close < 0) return t;
+
+      const inner = t.slice(i + 1, close);
+      if (!inner.trim()) return t;
+
+      out += 'abs(' + inner + ')';
+      i = close + 1;
+    }
+
+    return out;
+  }
+
   function toInfix(src, varName) {
     let t = String(src ?? '');
 
@@ -424,6 +573,8 @@
     t = t.replace(/\\(?:left|right)/g, '');
     t = t.replace(/\\operatorname\s*\{([^{}]*)\}/g, ' $1 ');
     t = t.replace(/\\\[|\\\]|\\\(|\\\)|\$/g, ' ');
+
+    t = expandAbs(t);
 
     // \sqrt is deliberately NOT handled by the command sweep above: it needs its
     // braces to survive so the argument can be bracketed properly. Gluing the
@@ -877,7 +1028,21 @@
 
     const body = rest.replace(/(?:\\,|\\;|\\!|\\ )?\s*d\s*[a-zA-Z]\s*$/, '').trim();
 
-    return { lower, upper, body, definite: lower !== null && upper !== null };
+    /* \int \frac{dx}{g(x)} —— 微分写在分子里的写法。
+       它和 \int \frac{1}{g(x)}\,dx 是同一个积分，但引擎只认「被积函数 最后跟着 dx」
+       这一种排布，于是整道题变成「读不懂」，只能落 uncertain。
+       线上 41 题样本里有 5 道栽在这上面，是纯排布差异，不是数学差异。
+
+       只匹配「分子恰好是 d<单字母>」这一种最明确的形态：
+         \frac{dx}{...}      → \frac{1}{...}
+         \frac{dt}{...}      → \frac{1}{...}
+         \frac{x\,dx}{...}   → 不匹配（分子不是纯微分，交给后面的规则，仍旧保守） */
+    const normalizedBody = body.replace(
+      /^\s*\\d?frac\s*\{\s*d\s*([a-zA-Z])\s*\}\s*\{/,
+      '\\frac{1}{'
+    );
+
+    return { lower, upper, body: normalizedBody, definite: lower !== null && upper !== null };
   }
 
   function stripPlusC(value) {
@@ -962,6 +1127,130 @@
     return { estimate: value, residual: spread, converged: false };
   }
 
+  /* 中心平均估计器 —— 专治「高阶抵消」型极限。
+
+     背景（真实案例）：((1+x)^{1/x} - e + (e/2)x - (11e/24)x² + (7e/16)x³)/x⁴
+     的分子是若干 O(1) 项相减后剩下的 O(x⁴)。x 小到 1e-3 以下时 double 的
+     舍入误差已经和真值同量级，采样值退化成纯噪声：
+         h=1e-2 → 1.144   h=1e-3 → 0.855   h=1e-4 → −2991   h=1e-5 → 1.8e9
+     于是 estimateLimit 两侧不一致 + 双档不收敛，直接返回 null ——
+     一道「标准答案符号写反」的题就这样从闸门下面滑了过去。
+
+     关键观察：当两侧各自收敛到同一个 L 时，奇次误差项在 (f(t+h)+f(t−h))/2
+     里相消，剩下的误差是 O(h²)，在舍入淹没之前一直是干净的。
+     上面那道题的中心平均：1.1661 → 1.1576 → 1.1552 → 1.1549 → 1.15478，
+     真值 1.15479785。
+
+     代价是「两侧同值」这个前提必须单独验证，否则 lim(x→0) 1/x 的中心平均
+     恒为 0，会被误判成「极限是 0」。所以这里要求：
+       · |(f(t+h)−f(t−h))/2| 随 h 减小而减小 —— 说明两侧在往同一个值靠，
+         而不是发散（1/x 会增大）或跳变（sign(x) 保持常数）；
+       · 中心平均本身落在一个足够窄的带里。
+     两条都成立才下结论；任何一条不成立就返回 null —— 宁可不确定。 */
+  function centeredEstimate(f, info) {
+    if (!Number.isFinite(info.target) || info.side) return null;
+
+    const steps = [1e-1, 5e-2, 2e-2, 1e-2, 5e-3, 2e-3];
+    const avgs = [];
+    const hds = [];
+
+    for (const h of steps) {
+      const left = safeEval(f, info.target - h);
+      const right = safeEval(f, info.target + h);
+      if (left === null || right === null) break;
+
+      avgs.push((left + right) / 2);
+      hds.push((right - left) / 2);
+    }
+
+    if (avgs.length < 3) return null;
+
+    // 圈定「|hd| 还在随 h 缩小」的可靠前缀，一旦不再缩小就停 —— 后面都是噪声。
+    let used = 1;
+    for (let i = 1; i < hds.length; i++) {
+      if (Math.abs(hds[i]) <= Math.abs(hds[i - 1]) * 1.05) used++;
+      else break;
+    }
+
+    if (used < 3) return null;
+
+    const firstHd = Math.abs(hds[0]);
+    const lastHd = Math.abs(hds[used - 1]);
+    if (firstHd > 0 && lastHd > 0 && lastHd > firstHd * 0.5) return null;
+
+    // 从可靠前缀的尾部往回取「最窄的那一段」：O(h²) 误差在粗端还很大，
+    // 把 h=1e-1 那种点算进去会让带宽虚高，反而判不出来。
+    let start = used - 1;
+    for (let i = used - 2; i >= 0; i--) {
+      const slice = avgs.slice(i, used);
+      const value = median(slice);
+      const spread = Math.max(...slice) - Math.min(...slice);
+      if (spread > 1e-3 * Math.max(1, Math.abs(value))) break;
+      start = i;
+    }
+
+    const band = avgs.slice(start, used);
+    if (band.length < 3) return null;
+
+    const value = median(band);
+    const spread = Math.max(...band) - Math.min(...band);
+    const scale = Math.max(1, Math.abs(value));
+
+    if (!Number.isFinite(value)) return null;
+    if (spread > 1e-2 * scale) return null;
+
+    // 带宽足够窄就当成收敛：调用方会据此收紧等价/拒稿容差，
+    // 这正是「符号写反」能立刻被判死的依据。
+    return {
+      estimate: value,
+      residual: spread,
+      converged: spread <= 1e-3 * scale,
+      centered: true
+    };
+  }
+
+  /* 干净发散证据 —— 只证明「AI 给的这个有限答案不可能对」，不回答真正的极限是什么。
+
+     闸门要拒的是一道题，不是要给出正确答案。所以这里刻意做弱判断：
+     「有限候选 + 采样呈干净的爆炸特征」已经足够说明这个有限数不可能正确，
+     至于真值是 +∞、−∞ 还是不存在，引擎不必、也不该去猜。
+
+     触发条件刻意严格（宁漏勿错）：
+       · 只采 1e-2 / 1e-3 / 1e-4 三档。1e-5 起舍入开始污染，
+         L8-3 那种题在 1e-5 上自己就先崩了（+7.5e5 / −1.0e6），把噪声当发散会误杀；
+       · 幅度必须逐档放大且每档至少 ×5 —— 收敛的函数不可能这样，
+         而 1/x 型（×10）和 1/x² 型（×100）都能过；
+       · 单侧满足即成立：单侧发散就足以说明双侧极限不存在。 */
+  function divergesCleanly(f, info) {
+    const steps = [1e-2, 1e-3, 1e-4];
+
+    const sideDiverges = sign => {
+      const mags = [];
+
+      for (const h of steps) {
+        const point = Number.isFinite(info.target) ? info.target + sign * h : sign / h;
+        const value = safeEval(f, point);
+        if (value === null) return false;
+        mags.push(Math.abs(value));
+      }
+
+      for (let i = 1; i < mags.length; i++) {
+        if (!(mags[i] >= mags[i - 1] * 5)) return false;
+      }
+
+      return true;
+    };
+
+    if (!Number.isFinite(info.target)) {
+      return sideDiverges(info.target > 0 ? 1 : -1);
+    }
+
+    if (info.side === '+') return sideDiverges(1);
+    if (info.side === '-') return sideDiverges(-1);
+
+    return sideDiverges(1) || sideDiverges(-1);
+  }
+
   /* Two sampling regimes, deliberately:
      - coarse (1e-2..1e-3) is immune to catastrophic cancellation, but converges
        slowly for functions whose error is O(h);
@@ -989,7 +1278,7 @@
         : (coarse && coarse.converged) ? coarse
           : (fine || coarse);
 
-    if (!primary || !Number.isFinite(primary.estimate)) return null;
+    if (!primary || !Number.isFinite(primary.estimate)) return centeredEstimate(f, info);
 
     const scale = Math.max(1, Math.abs(primary.estimate));
 
@@ -1013,6 +1302,66 @@
     return v === null ? null : v;
   }
 
+  /* 候选答案是 ±∞ / 不存在 时，判的是「趋势」而不是数值。
+
+     这个函数曾经被调用但从未定义 —— 于是任何一道标准答案是 ±∞ 或「不存在」
+     的极限题，走到 verifyLimit 都会抛 ReferenceError，把整个判题/闸门链路炸掉。
+     测试一直没碰到这条路径，因为备用题库和探针里的极限答案都是有限数。
+     现在把它补全，并且刻意保持保守：
+       finite           收敛到有限值
+       positiveInfinity / negativeInfinity  干净发散且方向明确
+       dne              两侧对不上（一侧有限一侧无穷、符号相反、或震荡发散）
+       null             判不了
+
+     阈值与 divergesCleanly 一致（逐档 ×5），外加一条「带宽」判断来识别收敛。
+     慢发散（比如 ln x → −∞，每档只涨 1.5 倍）会落到 null —— 宁可不确定。 */
+  const TREND_STEPS = [1e-2, 1e-3, 1e-4];
+
+  function sideTrend(f, info, sign) {
+    const vals = [];
+
+    for (const h of TREND_STEPS) {
+      const point = Number.isFinite(info.target) ? info.target + sign * h : sign / h;
+      const value = safeEval(f, point);
+      if (value === null) return null;
+      vals.push(value);
+    }
+
+    let blowUp = true;
+
+    for (let i = 1; i < vals.length; i++) {
+      if (!(Math.abs(vals[i]) >= Math.abs(vals[i - 1]) * 5)) { blowUp = false; break; }
+    }
+
+    if (blowUp) {
+      if (vals.every(v => v > 0)) return 'positiveInfinity';
+      if (vals.every(v => v < 0)) return 'negativeInfinity';
+      return 'unstable';
+    }
+
+    const spread = Math.max(...vals) - Math.min(...vals);
+    const scale = Math.max(1, ...vals.map(Math.abs));
+    if (spread <= 0.05 * scale) return 'finite';
+
+    return null;
+  }
+
+  function limitTrend(f, info) {
+    if (info.side === '+') return sideTrend(f, info, 1);
+    if (info.side === '-') return sideTrend(f, info, -1);
+    if (!Number.isFinite(info.target)) return sideTrend(f, info, info.target > 0 ? 1 : -1);
+
+    const left = sideTrend(f, info, -1);
+    const right = sideTrend(f, info, 1);
+    if (!left || !right) return null;
+
+    if (left === 'finite' && right === 'finite') return 'finite';
+    if (left === 'positiveInfinity' && right === 'positiveInfinity') return 'positiveInfinity';
+    if (left === 'negativeInfinity' && right === 'negativeInfinity') return 'negativeInfinity';
+
+    return 'dne';
+  }
+
   function verifyLimit(question, candidate) {
     const info = extractLimit(question.expression || question.prompt || '');
     if (!info) return 'uncertain';
@@ -1022,14 +1371,27 @@
 
     const cand = atom(candidate) || { kind: 'expression' };
 
+    // 含混写法（"无穷"、"发散"、"±∞"）和非法标量（1/0）不判 —— 既可能对也可能不对。
+    if (cand.kind === 'ambiguous' || cand.kind === 'invalid') return 'uncertain';
+
     if (cand.kind !== 'number' && cand.kind !== 'expression') {
       const trend = limitTrend(f, info);
       if (!trend) return 'uncertain';
-      return trend === cand.kind ? 'equivalent' : 'not_equivalent';
+      if (trend === 'finite') return 'not_equivalent';
+      if (trend === cand.kind) return 'equivalent';
+      // 「不存在」与「±∞」在教材口径下互相包含（非正常极限也写作极限不存在），
+      // 这条边界引擎分不清，所以不判。
+      if (trend === 'dne' || cand.kind === 'dne') return 'uncertain';
+      return 'not_equivalent';
     }
 
     const target = cand.kind === 'number' ? cand.value : constantValue(candidate);
     if (target === null) return 'uncertain';
+
+    // 有限候选 + 干净发散证据 → 直接判错，估计器都不用跑。
+    // 放在 estimateLimit 之前是有意的：发散题的采样本来就收敛不了，
+    // 让估计器先去啃它只会被噪声带偏，不如先判这条更硬也更省事。
+    if (divergesCleanly(f, info)) return 'not_equivalent';
 
     const result = estimateLimit(f, info);
     if (result === null) return 'uncertain';
@@ -1141,16 +1503,116 @@
     return 'uncertain';
   }
 
+  /* 「引擎有没有能力验证这道题」—— 与这一次数值收不收敛无关。
+     这里复刻的是 verify* 三个函数真正的前置条件：读不出题干，
+     后面的采样根本无从谈起。线上 41 题里 16 道的题干属于这一类
+     （Σ 求和型极限、分段函数、隐函数、参数方程、被积函数含 dx 排布…）。 */
+  function shapeSupport(question) {
+    if (!question || typeof question !== 'object') {
+      return { ok: false, reason: 'missing_question' };
+    }
+
+    const src = question.expression || question.prompt || '';
+    if (!src) return { ok: false, reason: 'missing_expression' };
+
+    if (question.module === 'limit') {
+      const info = extractLimit(src);
+      if (!info) return { ok: false, reason: 'limit_shape_unsupported' };
+      return tryParse(info.body, info.variable)
+        ? { ok: true, reason: 'limit_ok' }
+        : { ok: false, reason: 'limit_body_unparseable' };
+    }
+
+    if (question.module === 'derivative') {
+      const definition = splitDefinition(src);
+      if (definition.implicit) return { ok: false, reason: 'implicit_relation' };
+      if (!tryParse(definition.body, 'x')) return { ok: false, reason: 'derivative_body_unparseable' };
+      if (inferDerivativeOrder(question) > 2) return { ok: false, reason: 'high_order_derivative' };
+      return { ok: true, reason: 'derivative_ok' };
+    }
+
+    if (question.module === 'integral') {
+      const info = extractIntegral(src);
+      if (!info) return { ok: false, reason: 'integral_shape_unsupported' };
+      return tryParse(info.body, 'x')
+        ? { ok: true, reason: 'integral_ok' }
+        : { ok: false, reason: 'integrand_unparseable' };
+    }
+
+    return { ok: false, reason: 'module_unsupported' };
+  }
+
+  /* 分级 + 验证结论，一次算清。 */
+  function verificationProfile(question) {
+    const support = shapeSupport(question);
+
+    if (!support.ok) {
+      return {
+        tier: TIER.C,
+        readable: false,
+        verdict: 'uncertain',
+        reason: support.reason
+      };
+    }
+
+    const verdict = verifyAnswerAgainstQuestion(question, String(question?.answer ?? ''));
+
+    return {
+      tier: verdict === 'uncertain' ? TIER.B : TIER.A,
+      readable: true,
+      verdict,
+      reason: support.reason
+    };
+  }
+
+  /* 分层判定 —— 判题唯一入口。层数写进返回值，报告才分得清确定性覆盖率
+     到底靠哪一层涨上来的：
+
+       scalar      标量比较就够了（纯数字/分数/±∞/不存在）
+       structural  标量比不了，但结构检查能判（表达式、需要采样）
+       none        机器判不了 → 交给模型兜底
+
+     顺序不能倒：compare 便宜且是精确有理数比较，能定就别去做采样。 */
+  function judgeDeterministic(question, candidate) {
+    if (!question || typeof candidate !== 'string' || !candidate.trim()) {
+      return { verdict: 'uncertain', layer: 'none' };
+    }
+
+    const direct = compare(candidate, question.answer);
+    if (direct !== 'uncertain') return { verdict: direct, layer: 'scalar' };
+
+    const structural = verifyAnswerAgainstQuestion(question, candidate);
+    if (structural !== 'uncertain') return { verdict: structural, layer: 'structural' };
+
+    return { verdict: 'uncertain', layer: 'none' };
+  }
+
   /* Unified entry used by the judge: cheap atom comparison first, then the
      structural check. Same engine as the gate, so the two can never disagree
      about what counts as the right answer. */
   function verifyAgainstQuestion(question, candidate) {
-    if (!question || typeof candidate !== 'string' || !candidate.trim()) return 'uncertain';
+    return judgeDeterministic(question, candidate).verdict;
+  }
 
-    const direct = compare(candidate, question.answer);
-    if (direct !== 'uncertain') return direct;
+  /* 模型结论的可采信性 —— 前后端共用同一条规则，避免两边口径漂移。
+     单向原则：模型只能把答案判「错」，不能判「对」。
 
-    return verifyAnswerAgainstQuestion(question, candidate);
+     为什么不能反过来？两个方向的错误代价完全不对称：
+       · 错答被判对 → 学习数据被污染，自适应难度被带偏，且用户永远不知道
+       · 对答被判无法判定 → 用户再提交一次，损失一次交互
+     所以模型说 equivalent 时，最多只算「可能对」——确定性引擎与结构检查都
+     给不出结论，就老实说给不出结论（uncertain），而不是把权力让给模型。
+
+     返回 null 表示不采信。 */
+  function trustModelVerdict(verdict, confidence, floor) {
+    const v = typeof verdict === 'string' ? verdict.trim().toLowerCase() : '';
+    const conf = typeof confidence === 'number' && Number.isFinite(confidence) ? confidence : null;
+    const min = typeof floor === 'number' && Number.isFinite(floor) ? floor : CONFIDENCE_TRUSTED;
+
+    if (v !== 'not_equivalent') return null;
+    if (conf === null || conf < min) return null;
+
+    return { verdict: 'not_equivalent', trusted: true };
   }
 
   /* Are two expressions equal up to an additive constant? (indefinite integrals) */
@@ -1192,9 +1654,202 @@
     ]);
   }
 
+  /* =========================================================
+     Canonical Package —— 题目身份的不可变快照（Task 5D）
+     =========================================================
+
+     `content()` 已经能把七个 canonical 字段压成一个字符串，闸门用它比对快照。
+     但快照只是**一个字符串**：谁都能重算一次 content() 把它盖掉。
+     Task 5D 要的是「题目身份一旦确定就不许再变」这件事有个**可核对的指纹**，
+     以及一份列清楚「这道题由什么构成」的包，供前端、判题、预取、复习队列
+     共用同一个权威来源 —— 而不是各自照着 content() 再抄一遍字段清单。
+
+     指纹里**只放身份**：
+       question_id · 七个 canonical 字段 · source · verification 版本与快照
+     刻意**不放 difficulty**：难度是标定出来的测量值，会随作答数据重算。
+     把 difficulty 算进身份，等于每次重新标定都要换一个 question_id，
+     历史记录与复习队列会被无谓地切碎。难度变化不是「题目变了」。
+     同理也不放 displayTopic / displayDifficulty / metadataCorrection ——
+     那些是展示层修正，改了不该让题目失效（见 content() 的注释）。 */
+
+  const CANONICAL_FIELDS = [
+    'module',
+    'topic',
+    'instruction',
+    'expression',
+    'prompt',
+    'answer',
+    'solution'
+  ];
+
+  /* FNV-1a 32 位。这里要的只是「同一份内容必须得到同一个指纹、任何一字节改动
+     都必须改变指纹」，不需要密码学强度，也不需要依赖 crypto（浏览器与 Node
+     两端都要跑，且要能同步调用）。 */
+  function fingerprint(text) {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+  }
+
+  /* canonical 字段的统一取值：answer 一律转字符串，其余一律「原值或空串」。
+     兜底改写（例如空 topic 补『综合基础』）在这里是禁止的 —— 那等于往身份里
+     写一个题目本身没有的考点，快照与数据会当场分成两回事。 */
+  function canonicalBody(q) {
+    const body = {};
+    for (const field of CANONICAL_FIELDS) {
+      body[field] =
+        field === 'answer'
+          ? String(q?.answer ?? '')
+          : (q?.[field] || '');
+    }
+    return body;
+  }
+
+  function canonicalVersions(q) {
+    const v =
+      q?.verification?.pipeline ||
+      q?.verification?.versions ||
+      q?.pipeline ||
+      {};
+
+    return {
+      protocol: v.protocol ?? null,
+      generator: v.generator ?? null,
+      reviewer: v.reviewer ?? null,
+      judge: v.judge ?? null,
+      math_engine: v.math_engine ?? q?.verification?.version ?? null
+    };
+  }
+
+  function canonicalDifficulty(q) {
+    const value = Number(
+      q?.calibratedDifficulty ??
+      q?.provisionalDifficulty ??
+      q?.requestedDifficulty ??
+      q?.difficulty
+    );
+    return Number.isFinite(value) ? value : null;
+  }
+
+  /* 题目身份包。字段名按 Task 5D 的约定，前端 / 判题 / 预取 / 复习队列
+     都从这里取，不要再自己拼字段清单。 */
+  function canonicalPackage(q) {
+    const body = canonicalBody(q);
+    const verification = q?.verification;
+
+    return {
+      question_id: q?.question_id || q?.id || null,
+      question: {
+        module: body.module,
+        topic: body.topic,
+        instruction: body.instruction,
+        expression: body.expression,
+        prompt: body.prompt
+      },
+      canonical_answer: body.answer,
+      solution: body.solution,
+      module: body.module,
+      topic: body.topic,
+      difficulty: canonicalDifficulty(q),
+      verification: verification
+        ? {
+            version: verification.version ?? null,
+            status: verification.status ?? null,
+            content: verification.content ?? null,
+            confidence:
+              typeof verification.confidence === 'number'
+                ? verification.confidence
+                : null
+          }
+        : null,
+      source: q?.source || null,
+      versions: canonicalVersions(q),
+      created_at: q?.created_at || q?.createdAt || null
+    };
+  }
+
+  /* 指纹的输入：身份包去掉 difficulty（理由见上）。question_id 为空时
+     用空串占位 —— 「没有 id」也是一件必须被指纹记住的事，不能当作匹配。 */
+  function canonicalDigestPayload(q) {
+    const pkg = canonicalPackage(q);
+    return JSON.stringify({
+      question_id: pkg.question_id ?? '',
+      question: pkg.question,
+      canonical_answer: pkg.canonical_answer,
+      solution: pkg.solution,
+      verification: pkg.verification,
+      source: pkg.source,
+      versions: pkg.versions
+    });
+  }
+
+  function canonicalDigest(q) {
+    return fingerprint(canonicalDigestPayload(q));
+  }
+
+  /* 冻结：把指纹写在题目上。canonical_digest / canonical_frozen_at 都**不是**
+     canonical 字段，因此不会影响 content() 快照，也不会让题目失效。 */
+  function freezeCanonical(q, at) {
+    if (!q || typeof q !== 'object') return q;
+
+    q.canonical_digest = canonicalDigest(q);
+    q.canonical_frozen_at = at || q.canonical_frozen_at || new Date().toISOString();
+
+    return q;
+  }
+
+  /* 完整性核对。没有指纹的老数据一律视为「未记录」而不是「被改过」——
+     历史记录、云端快照里大量题目是在 Task 5D 之前存下的，
+     把它们判成篡改会让老用户一开 App 就满屏异常。 */
+  function canonicalIntegrity(q) {
+    const recorded = q?.canonical_digest;
+
+    if (!recorded) {
+      return { ok: true, recorded: null, actual: canonicalDigest(q), reason: 'unfrozen' };
+    }
+
+    const actual = canonicalDigest(q);
+
+    return {
+      ok: recorded === actual,
+      recorded,
+      actual,
+      reason: recorded === actual ? 'intact' : 'mutated'
+    };
+  }
+
+  function canonicalIntact(q) {
+    return canonicalIntegrity(q).ok;
+  }
+
+  /* 两个版本之间到底哪几个 canonical 字段变了 —— 用于日志与测试断言，
+     不要让调用方自己 diff。 */
+  function canonicalChangedFields(before, after) {
+    const a = canonicalBody(before);
+    const b = canonicalBody(after);
+    const changed = CANONICAL_FIELDS.filter(field => a[field] !== b[field]);
+
+    if ((before?.question_id || before?.id || null) !== (after?.question_id || after?.id || null)) {
+      changed.push('question_id');
+    }
+
+    return changed;
+  }
+
   function issues(q) {
     const out = [];
     if (!q) return [CODES.QUESTION_INVALID];
+
+    /* 被就地改写过的题目：连身份都不成立了，不必再往下验答案 ——
+       拿一份「已经不知道是谁」的题去验证答案，只会得到一条误导性的结论。 */
+    if (!canonicalIntact(q)) {
+      out.push(CODES.CANONICAL_MUTATED);
+      return out;
+    }
+
 
     if (
       !['limit', 'derivative', 'integral'].includes(q.module) ||
@@ -1262,22 +1917,71 @@
 
   function gateDecision(q) {
     const local = issues(q);
-    if (local.length) return { ok: false, code: local[0], issues: local };
+
+    if (local.length) {
+      return { ok: false, state: GATE.REJECTED, code: local[0], issues: local };
+    }
 
     const verification = q?.verification;
 
     if (verification && verification.content !== undefined && verification.content !== content(q)) {
-      return { ok: false, code: CODES.VERIFICATION_STALE, reason: 'content snapshot mismatch' };
+      return {
+        ok: false,
+        state: GATE.REJECTED,
+        code: CODES.VERIFICATION_STALE,
+        reason: 'content snapshot mismatch'
+      };
     }
 
     const gate = hardGate(verification);
-    if (!gate.ok) return gate;
 
-    return { ok: true, needsSecondaryReview: gate.needsSecondaryReview };
+    if (!gate.ok) return { ...gate, state: GATE.REJECTED };
+
+    /* 到这里 schema、快照、审核员硬字段全都过了。剩下唯一的问题是：
+       引擎到底有没有独立验证过这道题的标准答案？
+
+       Task 5C：对高风险数学内容，UNCERTAIN ≠ APPROVE。
+       形态读不懂（Tier C）就等于「没验证过」—— 此时放行，靠的是模型自己的
+       话，而线上 4/41 的错误标准答案恰恰是从这里漏出去的。
+       所以 Tier C 在生成闸门这里不放行，调用方应当退到已校验的备用题库。
+       少一道动态生成题可以接受，错一道进用户端不行。 */
+    const profile = verificationProfile(q);
+
+    if (profile.tier === TIER.C) {
+      return {
+        ok: false,
+        state: GATE.UNCERTAIN,
+        code: CODES.UNVERIFIED_SHAPE,
+        tier: profile.tier,
+        reason: profile.reason,
+        // 不是「题目有问题」，是「机器验不了」—— 上层据此走 fallback，而不是报异常。
+        unverified: true
+      };
+    }
+
+    return {
+      ok: true,
+      state: GATE.VERIFIED,
+      tier: profile.tier,
+      verdict: profile.verdict,
+      needsSecondaryReview: gate.needsSecondaryReview
+    };
   }
 
-  function approved(q) {
+  /* 生成闸门：只有 VERIFIED 才算过。Tier C（引擎验不了）一律不放行。 */
+  function gateApproved(q) {
     return gateDecision(q).ok;
+  }
+
+  /* 判题时的「这道题可信吗」——只把明确有问题的（REJECTED）判为不可信。
+
+     Tier C 在这里**放行**，这是有意的：题目本身没错、审核员也过了，
+     只是引擎没法独立复核。判题阶段不是纠正题目的地方，把用户正在做的题
+     判成「存在异常」并作废（用户白做一题、作答被丢弃）比不放行它更糟。
+     真正拦住 Tier C 的地方是生成闸门 —— 让它一开始就进不来。 */
+  function approved(q) {
+    const decision = gateDecision(q);
+    return decision.ok || decision.state === GATE.UNCERTAIN;
   }
 
   /* =========================================================
@@ -1337,6 +2041,8 @@
     SOFT_FIELDS,
     normalize,
     atom,
+    constantAtom,
+    containsVariable,
     rational,
     compare,
     toInfix,
@@ -1350,20 +2056,41 @@
     numericDerivativeOfOrder,
     inferDerivativeOrder,
     numericIntegral,
+    estimateLimit,
+    centeredEstimate,
+    divergesCleanly,
+    limitTrend,
     verifyLimit,
     verifyDerivative,
     verifyIntegral,
     verifyAgainstQuestion,
     verifyAnswerAgainstQuestion,
+    judgeDeterministic,
+    trustModelVerdict,
     differByConstant,
     extractLimit,
     extractIntegral,
     stripPlusC,
     content,
+    CANONICAL_FIELDS,
+    canonicalBody,
+    canonicalPackage,
+    canonicalDigest,
+    canonicalDigestPayload,
+    canonicalIntegrity,
+    canonicalIntact,
+    canonicalChangedFields,
+    freezeCanonical,
+    fingerprint,
     issues,
     hardGate,
     gateDecision,
+    gateApproved,
     approved,
+    shapeSupport,
+    verificationProfile,
+    GATE,
+    TIER,
     JUDGE_REASONS,
     judgeOutcome
   };

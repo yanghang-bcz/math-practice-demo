@@ -1,0 +1,227 @@
+{
+  "meta": {
+    "label": "finalcheck",
+    "url": "https://calcdaily-d5g2titwue91551fb-1482769901.ap-shanghai.app.tcloudbase.com/api/deepseek",
+    "health": {
+      "ok": true,
+      "service": "deepseek",
+      "adaptiveDifficultyModel": "v0-provisional",
+      "protocol_version": 2,
+      "pipeline": {
+        "protocol": 2,
+        "generator": "generator-v2",
+        "reviewer": "reviewer-v2",
+        "judge": "judge-v2",
+        "math_engine": "quality-v2"
+      }
+    },
+    "engine": "quality-v2",
+    "matrixSize": 50,
+    "concurrency": 3,
+    "repeat": 3,
+    "generated_at": "2026-09-19T15:56:27.714Z"
+  },
+  "headline": {
+    "Generate success": "1/1",
+    "Generate success rate": "100.0%",
+    "Gate reject（两轮全拒）": "0/1",
+    "Would fallback": "0/1",
+    "Wrong approved": "0/1",
+    "Structurally bad": "0/1",
+    "Answer-solution mismatch": "0/1",
+    "Answer fails verification": "0/1",
+    "Verification snapshot intact": "1/1",
+    "Server engine (verification.version)": "quality-v2",
+    "Local engine (math-quality)": "quality-v2",
+    "焦点格(导数/积分 L8+12) 通过": "0/0",
+    "焦点格 wrong approved": "0/0",
+    "Judge 重复次数合计": 0,
+    "Judge 重复一致": "0/0",
+    "judge 全部 equivalent": "0/0",
+    "judge 说参考答案可疑": 0,
+    "judge 改写标准答案": "无",
+    "canonical 保持不变": "0/0",
+    "judge 响应带 versions": "0/0",
+    "错答探针总数": 0,
+    "错答探针被误批为对（须为0）": 0,
+    "判题把错答说成「答案可疑」": 0,
+    "Generate latency avg": "3.1s",
+    "Generate latency P95": "3.1s",
+    "Generate latency max": "3.1s",
+    "Judge latency avg": "n/a",
+    "Judge latency P95": "n/a"
+  },
+  "versions_observed": [
+    {
+      "protocol": 2,
+      "generator": "generator-v2",
+      "reviewer": "reviewer-v2",
+      "judge": "judge-v2",
+      "math_engine": "quality-v2"
+    }
+  ],
+  "gate_rejection_reasons": {},
+  "by_cell": {
+    "limit L4": {
+      "total": 1,
+      "approved": 1,
+      "wrong_approved": 0,
+      "issues": {}
+    }
+  },
+  "wrong_approved_questions": [],
+  "structurally_bad_questions": [],
+  "judge_detail": [],
+  "rows": [
+    {
+      "index": 1,
+      "id": "limit-L4-1",
+      "module": "limit",
+      "requested_topic": "泰勒展开求极限",
+      "requested_difficulty": 4,
+      "focus": false,
+      "generate_ok": true,
+      "generate_http": 200,
+      "generate_latency_ms": 3081,
+      "generate_error": null,
+      "generate_error_code": null,
+      "rejection_reasons": [],
+      "attempts": 1,
+      "versions": {
+        "protocol": 2,
+        "generator": "generator-v2",
+        "reviewer": "reviewer-v2",
+        "judge": "judge-v2",
+        "math_engine": "quality-v2"
+      },
+      "would_fallback": false,
+      "question_id": "c8ecadb9-73a7-439b-8160-aeb6eccb4a4b",
+      "topic": "泰勒展开求极限",
+      "display_topic": null,
+      "display_difficulty": null,
+      "calibrated_difficulty": null,
+      "provisional_difficulty": 4,
+      "difficulty": 4,
+      "instruction": "计算极限",
+      "expression": "\\lim_{x\\to0}\\frac{\\sin x-x\\cos x}{x^3}",
+      "answer": "\\frac{1}{3}",
+      "solution": "利用泰勒展开：\\(\\sin x=x-\\frac{x^3}{6}+o(x^3)\\)，\\(\\cos x=1-\\frac{x^2}{2}+o(x^2)\\)，得 \\(x\\cos x=x-\\frac{x^3}{2}+o(x^3)\\)，故分子为 \\(\\frac{x^3}{3}+o(x^3)\\)，极限为 \\(\\frac{1}{3}\\)。",
+      "verification": {
+        "question_valid": true,
+        "answer_correct": true,
+        "solution_correct": true,
+        "answer_solution_consistent": true,
+        "topic_match": true,
+        "difficulty_reasonable": true,
+        "suggested_topic": "",
+        "suggested_difficulty": 4,
+        "canonical_suspected": false,
+        "confidence": 0.98,
+        "independent_answer": "\\frac{1}{3}",
+        "issues": [],
+        "reason": "泰勒展开计算正确，sinx - xcosx = x^3/3 + o(x^3)，极限为1/3，与参考答案一致。",
+        "version": "quality-v2",
+        "pipeline": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "status": "approved",
+        "gate": "hard",
+        "hard_fields": {
+          "question_valid": true,
+          "answer_correct": true,
+          "solution_correct": true,
+          "answer_solution_consistent": true
+        },
+        "reviewer_notes": [],
+        "metadata": null,
+        "content": "[\"limit\",\"泰勒展开求极限\",\"计算极限\",\"\\\\lim_{x\\\\to0}\\\\frac{\\\\sin x-x\\\\cos x}{x^3}\",\"\",\"\\\\frac{1}{3}\",\"利用泰勒展开：\\\\(\\\\sin x=x-\\\\frac{x^3}{6}+o(x^3)\\\\)，\\\\(\\\\cos x=1-\\\\frac{x^2}{2}+o(x^2)\\\\)，得 \\\\(x\\\\cos x=x-\\\\frac{x^3}{2}+o(x^3)\\\\)，故分子为 \\\\(\\\\frac{x^3}{3}+o(x^3)\\\\)，极限为 \\\\(\\\\frac{1}{3}\\\\)。\"]"
+      },
+      "verification_version": "quality-v2",
+      "prompt": null,
+      "raw_question": {
+        "module": "limit",
+        "topic": "泰勒展开求极限",
+        "difficulty": 4,
+        "selfEstimatedDifficulty": 4,
+        "difficultyDimensions": {
+          "recognition": 4,
+          "techniqueDepth": 4,
+          "calculationComplexity": 4,
+          "knowledgeCoupling": 4
+        },
+        "instruction": "计算极限",
+        "expression": "\\lim_{x\\to0}\\frac{\\sin x-x\\cos x}{x^3}",
+        "answer": "\\frac{1}{3}",
+        "solution": "利用泰勒展开：\\(\\sin x=x-\\frac{x^3}{6}+o(x^3)\\)，\\(\\cos x=1-\\frac{x^2}{2}+o(x^2)\\)，得 \\(x\\cos x=x-\\frac{x^3}{2}+o(x^3)\\)，故分子为 \\(\\frac{x^3}{3}+o(x^3)\\)，极限为 \\(\\frac{1}{3}\\)。",
+        "keySteps": [
+          "展开 \\(\\sin x\\) 与 \\(\\cos x\\)",
+          "计算 \\(\\sin x-x\\cos x\\) 的主项",
+          "约去 \\(x^3\\) 得极限"
+        ],
+        "provisionalDifficulty": 4,
+        "estimatedDifficulty": 4,
+        "difficultyConfidence": 0.4,
+        "question_id": "c8ecadb9-73a7-439b-8160-aeb6eccb4a4b",
+        "id": "c8ecadb9-73a7-439b-8160-aeb6eccb4a4b",
+        "model": "deepseek-v4-flash",
+        "generator_prompt_version": "generator-v2",
+        "review_prompt_version": "reviewer-v2",
+        "status": "approved",
+        "verification": {
+          "question_valid": true,
+          "answer_correct": true,
+          "solution_correct": true,
+          "answer_solution_consistent": true,
+          "topic_match": true,
+          "difficulty_reasonable": true,
+          "suggested_topic": "",
+          "suggested_difficulty": 4,
+          "canonical_suspected": false,
+          "confidence": 0.98,
+          "independent_answer": "\\frac{1}{3}",
+          "issues": [],
+          "reason": "泰勒展开计算正确，sinx - xcosx = x^3/3 + o(x^3)，极限为1/3，与参考答案一致。",
+          "version": "quality-v2",
+          "pipeline": {
+            "protocol": 2,
+            "generator": "generator-v2",
+            "reviewer": "reviewer-v2",
+            "judge": "judge-v2",
+            "math_engine": "quality-v2"
+          },
+          "status": "approved",
+          "gate": "hard",
+          "hard_fields": {
+            "question_valid": true,
+            "answer_correct": true,
+            "solution_correct": true,
+            "answer_solution_consistent": true
+          },
+          "reviewer_notes": [],
+          "metadata": null,
+          "content": "[\"limit\",\"泰勒展开求极限\",\"计算极限\",\"\\\\lim_{x\\\\to0}\\\\frac{\\\\sin x-x\\\\cos x}{x^3}\",\"\",\"\\\\frac{1}{3}\",\"利用泰勒展开：\\\\(\\\\sin x=x-\\\\frac{x^3}{6}+o(x^3)\\\\)，\\\\(\\\\cos x=1-\\\\frac{x^2}{2}+o(x^2)\\\\)，得 \\\\(x\\\\cos x=x-\\\\frac{x^3}{2}+o(x^3)\\\\)，故分子为 \\\\(\\\\frac{x^3}{3}+o(x^3)\\\\)，极限为 \\\\(\\\\frac{1}{3}\\\\)。\"]"
+        }
+      },
+      "check": {
+        "ok": true,
+        "issues": [],
+        "approved": true,
+        "answer_verifies": "equivalent",
+        "solution_mismatch": false,
+        "answer_fails_verification": false,
+        "snapshot_intact": true,
+        "claimed_in_solution": [
+          "\\(\\frac{1}{3}\\)"
+        ],
+        "wrong_approved": false,
+        "structurally_bad": false
+      },
+      "judge": null,
+      "evaluate": null
+    }
+  ]
+}
