@@ -15,15 +15,35 @@
 - 环境变量/密钥不在仓库里，别去找。
 
 ## 部署拓扑（两个独立部署物，会劈叉）
-- **前端**：静态托管（Tencent COS，响应头 `server: tcbgw`）。v6 地址
-  `https://calcdaily-v6-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/`，
-  含 7 个文件：`index.html`、`cloudbase-client.js`、`storage.js`、`auth.js`、
-  `math-quality.js`、`fallback-bank.js`、`app.js`。该地址下的 `/api/*` 一律 404
-  （静态托管不代理云函数）。
+- **前端：现在只剩【一个】有效地址**（2026-09-20 晚复测）：
+  - ✅ **唯一生产域名** `https://calcdaily-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/`
+    —— 2026-09-20 下午实测 = **`7f35c89`（v1.1）**，7 个文件 + `vendor/mathjax` **8/8 逐字节一致**。
+  - ❌ **`calcdaily-v4-…` / `calcdaily-v6-…` 两个老站【已被删除】**。
+    现在访问返回 `{"code":"INVALID_HOST"}` —— 不是 404 内容，是**主机名压根不再绑定**。
+    （原先 v4 = `ca51046` 4-script 旧架构、v6 = `79adbeb`，现在都没了。）
+  - 🔴 **2026-09-20 晚：生产域名全部路径 404**，`Key: calcdaily%2F%2Findex.html`
+    —— 托管配置拼出**双斜杠**（根目录带尾斜杠 + 请求路径带前导斜杠）。
+    候选修法：默认首页 `/index.html` → `index.html`，或根目录 `calcdaily/` → `calcdaily`。
+    **后端不受影响**（`?health=1` 仍是 200）。文件应在桶里，是配置而非数据问题。
+  - **判断「站还在不在」有个干净的探针**（两个错误码含义完全不同）：
+    - `INVALID_HOST` = **站点不存在**（已被删）
+    - `NoSuchKey`（COS，带 `<li>Key: …`）= **站点存在但内容路径拼错了**
+    拿 20 个可能的站点名扫过一遍，只有 `calcdaily-calcdaily-<envid>` 有效。
+  - ⚠️ **核对线上版本时不要只测别人给的地址**：v1.1 恰恰部署在"最不像线上"的那个无后缀域名上。
+    用户口述的"正式线上"是 v4、项目 memory 原先记的是 v6，**两个都不是生产域名**。
+    下"没部署"结论之前，先把域名变体（带部署版本号后缀的、不带后缀的）都探一遍。
+  - ✅ **文档已统一**（2026-09-20）：README:10 / README:628 / `docs/PRD.md`:6 / `:1863`
+    四处均已改为上面的唯一生产域名（原先全指向已删除的 v4 站）。
+- 前端文件清单：7 个 —— `index.html`、`cloudbase-client.js`、`storage.js`、`auth.js`、
+  `math-quality.js`、`fallback-bank.js`、`app.js`（另有 `vendor/mathjax/`，一般不动）。
+  该地址下的 `/api/*` 一律 404（静态托管不代理云函数）。
+- **v1.1 实际只改了前端 3 个文件**：`app.js`、`math-quality.js`、`storage.js`
+  （`79adbeb → 7f35c89`；其余 4 个逐字节不变）。所以从 `79adbeb` 那个站补发只需这 3 个同批，
+  但**这 3 个必须同批**——只传 `app.js` 会让新客户端跑在旧引擎上；从 `ca51046` 补发则要全量 7 个。
 - **后端**：云函数 `deepseek`，HTTP 访问路径
   `https://calcdaily-d5g2titwue91551fb-1482769901.ap-shanghai.app.tcloudbase.com/api/deepseek`
   （env `calcdaily-d5g2titwue91551fb`，ap-shanghai）。部署 = 覆盖该函数的
-  `index.js` + `math-quality.js`。
+  `index.js` + `math-quality.js`。**2026-09-20 实测：线上后端已是 v1.1。**
 - **后端地址硬编码在前端**：`cloudbase-client.js` 第 21 行、`app.js` 第 1502 行。
 - **只发前端 = 新客户端 + 旧后端**。此时新版服务端能力全部休眠（`canonical_suspected`
   作废、`judge_unavailable` 重试提示、服务端 `displayDifficulty` 元数据纠正、
@@ -34,12 +54,25 @@
   所以 v1.1 的正确顺序是**后端先、前端后**；回滚相反（先回前端）。
   部署细节见 `RELIABILITY-TASK5.md` §5。
 - **上线后必做版本自查**：
-  - 后端：`GET <后端>/api/deepseek?health=1` → 新版必含 `"protocol_version":2`
-    和 `"pipeline":{protocol,generator,reviewer,judge,math_engine}`；旧版只有
-    `ok` / `service` / `adaptiveDifficultyModel` 三个字段。
+  - 后端（**最可靠的判别项**）：`GET <后端>/api/deepseek?health=1` →
+    看 **`math_engine_version`**。`79adbeb` 及更早的后端里这个字段**根本不存在**，
+    只有 `7f35c89`（v1.1）起才有；线上返回它就等于 v1.1 已部署。
+    ⚠️ **`protocol_version` 不能当判别项** —— `79adbeb` 和 `7f35c89` 两版代码里都有（各 1 次）。
+    用它会判错（2026-09-20 犯过）。
   - 后端（更快）：`POST {"action":"judge"}` 空载荷 → 新版必带 `reason`
-    （`empty_input`）和 `versions`；旧版只有 `{"verdict":"uncertain","trusted":false}`。
-  - 前端：`shasum -a 256` 逐个对比线上 7 个文件与本地同名文件。
+    （`empty_input`）和 `versions`；更早版本只有 `{"verdict":"uncertain","trusted":false}`。
+  - 前端：**先看 HTTP 状态码，再比 `shasum -a 256`**。
+    **只比哈希不比状态码会得出错误结论** —— CloudBase 的 404 页内容每次略有不同，
+    哈希会乱跳，看起来像"文件不一致"甚至像"正在部署中"。
+    ```bash
+    for f in index.html cloudbase-client.js storage.js auth.js math-quality.js fallback-bank.js app.js; do
+      printf '%-20s %s %s\n' "$f" \
+        "$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' "$FE/$f")" \
+        "$(curl -s --noproxy '*' "$FE/$f" | shasum -a 256 | cut -c1-16)"
+    done
+    ```
+    想知道线上是**哪个提交**，就拿哈希去逐提交比：`git show <rev>:<file> | shasum -a 256`。
+  - ⚠️ 本机环境有 `HTTP_PROXY`，所有 curl 都要加 `--noproxy '*'`。
 - 本机**没有任何部署凭据或 CLI**（无 `tcb` / `cloudbase` / `vercel`，无 `~/.tcb`、
   `~/.config/cloudbase`），agent 无法自行部署，必须由用户操作。
 

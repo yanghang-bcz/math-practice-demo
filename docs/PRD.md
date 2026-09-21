@@ -3,7 +3,7 @@
 > Adaptive Calculus Practice for Chinese Postgraduate Entrance Exams
 
 **在线体验：**  
-https://calcdaily-v4-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/
+https://calcdaily-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/
 
 ---
 
@@ -1860,4 +1860,4 @@ CalcDaily 最终希望解决的不是：
 ## CalcDaily · v1.0 Beta
 
 **Live Product:**  
-https://calcdaily-v4-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/
+https://calcdaily-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/

@@ -19,9 +19,15 @@ import { checkQuestion, isWrongApproved, isStructurallyBad, ENGINE_VERSION } fro
 
 /* 探针组挪到 probes.mjs 了（Task #4 · D 扩到全形态：符号翻转、×2、
    2(...)、2\cdot(...)、2\times(...)、裸 \frac 速写、±1 扰动、以及一批
-   「古怪但合法」的写法）。这里再导出一遍是为了兼容已有的守卫测试。 */
+   「古怪但合法」的写法）。这里再导出一遍是为了兼容已有的守卫测试。
+
+   ⚠️ 注意：`export { X } from '...'` 是**再导出**，它**不会**在本模块里创建 `X` 的绑定。
+   2026-09-20 线上跑 50 题时才发现：下面这行原本只 import 了 `probesFor`，
+   结果判题阶段一用 `WRONG_PROBES` 就 ReferenceError 崩掉——
+   而守卫测试只消费再导出的名字（那条路是通的），所以一直没暴露。
+   凡本模块**自己要用**的名字，必须再显式 import 一次。 */
 export { WRONG_PROBES, VALID_PROBES, probesFor, rhsOf } from './probes.mjs';
-import { probesFor } from './probes.mjs';
+import { WRONG_PROBES, VALID_PROBES, probesFor } from './probes.mjs';
 
 /* 本机环境设了 HTTP_PROXY，Node 的 fetch 在某些版本会读它并拦成 502。
    这个脚本只打测试目标，直接清掉最省事。放在 main 里，避免 import 时改测试进程的环境。 */

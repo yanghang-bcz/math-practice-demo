@@ -215,3 +215,61 @@ test('已知覆盖缺口：解析里裸写的符号答案提取不到', async ()
     '若这里变成 true，说明引擎增强了，请同步更新报告里的「局限」段落'
   );
 });
+
+/* 静态守卫：「再导出」≠「本地绑定」。
+ *
+ * 来由（2026-09-20 线上实测）：run.mjs 里写着
+ *     export { WRONG_PROBES, VALID_PROBES, probesFor, rhsOf } from './probes.mjs';
+ *     import { probesFor } from './probes.mjs';
+ * 前一行是**再导出**，它不会在本模块作用域里创建 WRONG_PROBES 的绑定。
+ * 于是 50 题线上跑时：生成阶段 50/50 跑完，进入判题阶段立刻
+ *     ReferenceError: WRONG_PROBES is not defined
+ * 整轮作废（模型调用已经花掉了）。
+ *
+ * 为什么上面那些守卫抓不到：它们是 `await import('run.mjs')` 之后读**模块导出**，
+ * 而那条路走的正是再导出、是通的。出问题的是模块**内部**用到的本地绑定。
+ * 所以这里必须静态看源码，不能靠 import 一下就算数。
+ */
+test('run.mjs：凡正文用到 probes.mjs 的导出名，必须真的 import（再导出不算）', async () => {
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+
+  const raw = fs.readFileSync(
+    nodePath.join(__dirname, '..', 'tools', 'smoke', 'run.mjs'),
+    'utf8'
+  );
+  const exported = Object.keys(await import('../tools/smoke/probes.mjs'));
+
+  // ① 只认真正的 import 语句
+  const local = new Set();
+  for (const m of raw.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]\.\/probes\.mjs['"]/g)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(/\s+as\s+/).pop().trim();
+      if (name) local.add(name);
+    }
+  }
+
+  // ② 剥掉注释与 `export { ... } from './probes.mjs'`，剩下的才是"正文"
+  const body = raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/export\s*\{[^}]*\}\s*from\s*['"]\.\/probes\.mjs['"]\s*;?/g, '');
+
+  const missing = exported.filter(
+    (name) => !local.has(name) && new RegExp(`\\b${name}\\b`).test(body)
+  );
+
+  assert.deepStrictEqual(
+    missing,
+    [],
+    '这些名字在 run.mjs 正文里被用到，却只做了再导出、没有 import —— 跑到那一步就会 ReferenceError：\n  ' +
+      missing.join('\n  ')
+  );
+
+  // 反向兜底：正则一旦失效会让上面静默通过，所以再钉几处已知事实
+  for (const name of ['WRONG_PROBES', 'VALID_PROBES']) {
+    assert.ok(exported.includes(name), `probes.mjs 不再导出 ${name}？守卫需要同步`);
+    assert.ok(local.has(name), `本地 import 里必须有 ${name}`);
+  }
+  assert.ok(exported.length >= 5, 'probes.mjs 的导出面变了，守卫需要重新审阅');
+});

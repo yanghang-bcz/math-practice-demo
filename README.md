@@ -7,7 +7,7 @@
 </p>
 
 <p>
-  <a href="https://calcdaily-v4-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/">
+  <a href="https://calcdaily-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/">
     <strong>在线体验 →</strong>
   </a>
   &nbsp;&nbsp;&nbsp;
@@ -625,7 +625,7 @@ CalcDaily 并不是一次为了快速完成作品集而生成的项目。
 
 **CalcDaily · v1.0 Beta**
 
-[在线体验](https://calcdaily-v4-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/)
+[在线体验](https://calcdaily-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/)
 &nbsp;·&nbsp;
 [完整 PRD](./docs/PRD.md)
 

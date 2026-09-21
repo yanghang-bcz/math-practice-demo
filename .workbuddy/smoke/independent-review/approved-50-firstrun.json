@@ -1,0 +1,312 @@
+[
+ {
+  "round": "r1x",
+  "id": "limit-L4-1",
+  "module": "limit",
+  "difficulty": 4,
+  "instruction": "计算极限",
+  "expression": "\\lim_{x\\to0}\\frac{\\ln(1+x)-x+\\frac{x^2}{2}}{x^3}",
+  "answer": "\\frac{1}{3}",
+  "solution": "将 \\(\\ln(1+x)\\) 泰勒展开到 \\(x^3\\) 项：\\(\\ln(1+x)=x-\\frac{x^2}{2}+\\frac{x^3}{3}+o(x^3)\\)。代入分子得 \\(\\frac{x^3}{3}+o(x^3)\\)，除以 \\(x^3\\) 后取极限为 \\(\\frac{1}{3}\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "limit-L4-3",
+  "module": "limit",
+  "difficulty": 4,
+  "instruction": "计算极限",
+  "expression": "\\lim_{x\\to0}\\frac{\\sin x}{x}\\left(1+\\frac{\\sin x}{x}\\right)",
+  "answer": "2",
+  "solution": "由重要极限 \\(\\lim_{x\\to0}\\frac{\\sin x}{x}=1\\)，代入得 \\(1\\cdot(1+1)=2\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "limit-L6-3",
+  "module": "limit",
+  "difficulty": 6,
+  "instruction": "计算极限",
+  "expression": "\\lim_{x\\to0}\\frac{e^x-1-x-\\frac{x^2}{2}}{x^3}",
+  "answer": "\\frac{1}{6}",
+  "solution": "这是 \\(\\frac{0}{0}\\) 型，可用洛必达法则连续求导三次：第一次得 \\(\\frac{e^x-1-x}{3x^2}\\)，第二次得 \\(\\frac{e^x-1}{6x}\\)，第三次得 \\(\\frac{e^x}{6}\\)，取极限为 \\(\\frac{1}{6}\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "limit-L8-2",
+  "module": "limit",
+  "difficulty": 8,
+  "instruction": "计算极限",
+  "expression": "\\lim_{x\\to0}\\left(\\frac{1}{x^2}-\\frac{1}{x\\tan x}\\right)",
+  "answer": "\\frac{1}{3}",
+  "solution": "先通分得 \\(\\frac{\\tan x-x}{x^2\\tan x}\\)，利用 \\(\\tan x\\sim x\\) 化为 \\(\\frac{\\tan x-x}{x^3}\\)。对 \\(\\tan x-x\\) 泰勒展开：\\(\\tan x=x+\\frac{x^3}{3}+o(x^3)\\)，故极限为 \\(\\frac{1}{3}\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "limit-L8-3",
+  "module": "limit",
+  "difficulty": 8,
+  "instruction": "计算极限",
+  "expression": "\\lim_{x\\to 0}\\frac{\\sqrt{1+2x+3x^2}-\\sqrt{1+2x-3x^2}}{x\\sin x}",
+  "answer": "3",
+  "solution": "先有理化分子：\\(\\sqrt{1+2x+3x^2}-\\sqrt{1+2x-3x^2}=\\frac{6x^2}{\\sqrt{1+2x+3x^2}+\\sqrt{1+2x-3x^2}}\\)。分母 \\(x\\sin x\\sim x^2\\)，故原极限为 \\(\\frac{6}{2}=3\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "limit-L10-1",
+  "module": "limit",
+  "difficulty": 10,
+  "instruction": "计算极限",
+  "expression": "\\lim_{x\\to0}\\left(\\frac{\\sin x}{x}\\right)^{\\frac{1}{1-\\cos x}}",
+  "answer": "e^{-1/3}",
+  "solution": "取对数化为 \\(\\frac{\\ln(\\sin x/x)}{1-\\cos x}\\)，用泰勒展开 \\(\\sin x=x-\\frac{x^3}{6}+o(x^3)\\) 得 \\(\\ln(\\sin x/x)\\sim -\\frac{x^2}{6}\\)，分母 \\(1-\\cos x\\sim \\frac{x^2}{2}\\)，故极限为 \\(e^{-1/3}\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "limit-L12-1",
+  "module": "limit",
+  "difficulty": 12,
+  "instruction": "计算极限",
+  "expression": "\\lim_{x\\to0}\\frac{\\sqrt{1+\\tan x}-\\sqrt{1+\\sin x}}{x^3}",
+  "answer": "1/4",
+  "solution": "先有理化：\\(\\sqrt{1+\\tan x}-\\sqrt{1+\\sin x}=\\frac{\\tan x-\\sin x}{\\sqrt{1+\\tan x}+\\sqrt{1+\\sin x}}\\)。分母趋于 \\(2\\)，故原极限等于 \\(\\frac12\\lim_{x\\to0}\\frac{\\tan x-\\sin x}{x^3}\\)。又 \\(\\tan x-\\sin x=\\tan x(1-\\cos x)\\sim x\\cdot\\frac{x^2}{2}=\\frac{x^3}{2}\\)，所以极限为 \\(\\frac12\\cdot\\frac12=\\frac14\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "derivative-L4-2",
+  "module": "derivative",
+  "difficulty": 4,
+  "instruction": "求二阶导数",
+  "expression": "y=\\ln(1+x^2)",
+  "answer": "\\frac{2(1-x^2)}{(1+x^2)^2}",
+  "solution": "先求一阶导 \\( y'=\\frac{2x}{1+x^2} \\)，再用商法则求二阶导，化简得 \\( y''=\\frac{2(1-x^2)}{(1+x^2)^2} \\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "limit-L12-2",
+  "module": "limit",
+  "difficulty": 12,
+  "instruction": "计算极限",
+  "expression": "\\lim_{x\\to0}\\frac{\\left(1+x\\right)^{1/x}-e+\\frac{e}{2}x-\\frac{11e}{24}x^2}{x^3}",
+  "answer": "-\\frac{7e}{16}",
+  "solution": "对 \\( (1+x)^{1/x} \\) 取对数并作三阶泰勒展开：\\( \\ln(1+x)=x-\\frac{x^2}{2}+\\frac{x^3}{3}-\\frac{x^4}{4}+O(x^5) \\)，故 \\( \\frac{\\ln(1+x)}{x}=1-\\frac{x}{2}+\\frac{x^2}{3}-\\frac{x^3}{4}+O(x^4) \\)。再展开指数得 \\( (1+x)^{1/x}=e\\left[1-\\frac{x}{2}+\\frac{11x^2}{24}-\\frac{7x^3}{16}+O(x^4)\\right] \\)。代入分子，三次项系数为 \\( -\\frac{7e}{16} \\)，故极限为 \\( -\\frac{7e}{16} \\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "derivative-L6-1",
+  "module": "derivative",
+  "difficulty": 6,
+  "instruction": "求二阶导数",
+  "expression": "y=\\ln(1+x^2)",
+  "answer": "\\frac{2(1-x^2)}{(1+x^2)^2}",
+  "solution": "先求一阶导 \\( y'=\\frac{2x}{1+x^2} \\)，再用商的求导法则求二阶导，化简得 \\( y''=\\frac{2(1-x^2)}{(1+x^2)^2} \\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "derivative-L6-3",
+  "module": "derivative",
+  "difficulty": 6,
+  "instruction": "求导",
+  "expression": "y=\\ln\\left(\\frac{x^2}{\\sqrt{x^2+1}}\\right)",
+  "answer": "\\frac{2}{x}-\\frac{x}{x^2+1}",
+  "solution": "先利用对数性质化简：\\(y=2\\ln x-\\frac12\\ln(x^2+1)\\)，再逐项求导得 \\(y'=\\frac{2}{x}-\\frac{x}{x^2+1}\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "derivative-L8-2",
+  "module": "derivative",
+  "difficulty": 8,
+  "instruction": "求导",
+  "expression": "y=\\arctan\\left(\\frac{x}{\\sqrt{1+x^2}}\\right)",
+  "answer": "\\frac{1}{(1+2x^2)\\sqrt{1+x^2}}",
+  "solution": "令 \\(u=\\frac{x}{\\sqrt{1+x^2}}\\)，则 \\(y=\\arctan u\\)，\\(y'=\\frac{u'}{1+u^2}\\)。计算 \\(u'=\\frac{1}{(1+x^2)^{3/2}}\\)，且 \\(1+u^2=1+\\frac{x^2}{1+x^2}=\\frac{1+2x^2}{1+x^2}\\)，代入化简得 \\(y'=\\frac{1}{(1+2x^2)\\sqrt{1+x^2}}\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "derivative-L10-1",
+  "module": "derivative",
+  "difficulty": 10,
+  "instruction": "求导",
+  "expression": "y=\\left(\\frac{x^2+1}{x^2-1}\\right)^{\\arctan x}",
+  "answer": "\\left(\\frac{x^2+1}{x^2-1}\\right)^{\\arctan x}\\left[\\frac{\\ln\\left(\\frac{x^2+1}{x^2-1}\\right)}{1+x^2}-\\frac{4x}{(x^2+1)(x^2-1)}\\right]",
+  "solution": "这是幂指函数，先取对数：\\(\\ln y=\\arctan x\\cdot\\ln\\frac{x^2+1}{x^2-1}\\)。两边对 \\(x\\) 求导，左边为 \\(\\frac{y'}{y}\\)，右边用乘积法则与链式法则。整理后乘以 \\(y\\) 即得答案。"
+ },
+ {
+  "round": "r1x",
+  "id": "derivative-L10-4",
+  "module": "derivative",
+  "difficulty": 10,
+  "instruction": "求二阶导数",
+  "expression": "y=\\ln\\left(x+\\sqrt{1+x^2}\\right)",
+  "answer": "-\\frac{x}{(1+x^2)^{3/2}}",
+  "solution": "先求一阶导：\\( y'=\\frac{1}{\\sqrt{1+x^2}} \\)。再对 \\( y' \\) 求导，得 \\( y''=-\\frac{x}{(1+x^2)^{3/2}} \\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "derivative-L12-3",
+  "module": "derivative",
+  "difficulty": 12,
+  "instruction": "求二阶导数",
+  "expression": "y=\\arctan\\left(\\frac{x+1}{x-1}\\right)",
+  "answer": "\\frac{2x}{(x^2+1)^2}",
+  "solution": "先化简：\\(\\frac{x+1}{x-1}=1+\\frac{2}{x-1}\\)，但直接求导更简洁。令 \\(u=\\frac{x+1}{x-1}\\)，则 \\(y'=\\frac{1}{1+u^2}\\cdot u'\\)。计算得 \\(y'=\\frac{-1}{x^2+1}\\)，再求导得 \\(y''=\\frac{2x}{(x^2+1)^2}\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L4-1",
+  "module": "integral",
+  "difficulty": 4,
+  "instruction": "计算不定积分",
+  "expression": "\\int \\frac{dx}{1+\\sin x+\\cos x}",
+  "answer": "\\ln\\left|1+\\tan\\frac{x}{2}\\right|+C",
+  "solution": "令 \\(t=\\tan\\frac{x}{2}\\)，则 \\(\\sin x=\\frac{2t}{1+t^2}\\)，\\(\\cos x=\\frac{1-t^2}{1+t^2}\\)，\\(dx=\\frac{2}{1+t^2}dt\\)。代入化简得 \\(\\int\\frac{dt}{1+t}\\)，积分后回代即可。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L4-2",
+  "module": "integral",
+  "difficulty": 4,
+  "instruction": "计算不定积分",
+  "expression": "\\int \\frac{x+2}{x^2-5x+6}\\,dx",
+  "answer": "5\\ln|x-3|-4\\ln|x-2|+C",
+  "solution": "分母因式分解为 \\((x-2)(x-3)\\)，设 \\(\\frac{x+2}{(x-2)(x-3)}=\\frac{A}{x-2}+\\frac{B}{x-3}\\)，解得 \\(A=-4,\\ B=5\\)，逐项积分。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L4-3",
+  "module": "integral",
+  "difficulty": 4,
+  "instruction": "计算定积分",
+  "expression": "\\int_0^1 \\frac{x}{1+x^2}\\,dx",
+  "answer": "\\frac{1}{2}\\ln 2",
+  "solution": "令 \\(u=1+x^2\\)，则 \\(du=2x\\,dx\\)，积分化为 \\(\\frac12\\int_1^2 \\frac{du}{u}\\)，计算得 \\(\\frac12\\ln 2\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L6-1",
+  "module": "integral",
+  "difficulty": 6,
+  "instruction": "计算不定积分",
+  "expression": "\\int \\frac{x^2+1}{x^4+1}\\,dx",
+  "answer": "\\frac{1}{\\sqrt{2}}\\arctan\\left(\\frac{x^2-1}{\\sqrt{2}x}\\right)+C",
+  "solution": "将被积函数改写为 \\(\\frac{1+1/x^2}{x^2+1/x^2}\\)，令 \\(t=x-\\frac{1}{x}\\)，则 \\(dt=(1+1/x^2)dx\\)，且 \\(x^2+1/x^2=t^2+2\\)。积分化为 \\(\\int \\frac{dt}{t^2+2}\\)，回代即得结果。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L6-2",
+  "module": "integral",
+  "difficulty": 6,
+  "instruction": "计算定积分",
+  "expression": "\\int_{0}^{\\pi/2} \\frac{\\cos x}{1+\\sin^2 x}\\,dx",
+  "answer": "\\frac{\\pi}{4}",
+  "solution": "令 \\(t=\\sin x\\)，则 \\(dt=\\cos x\\,dx\\)，积分化为 \\(\\int_{0}^{1}\\frac{dt}{1+t^2}\\)，其原函数为 \\(\\arctan t\\)，代入上下限得 \\(\\arctan 1-\\arctan 0=\\frac{\\pi}{4}\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L6-3",
+  "module": "integral",
+  "difficulty": 6,
+  "instruction": "计算不定积分",
+  "expression": "\\int x \\arctan x \\, dx",
+  "answer": "\\frac{x^2+1}{2}\\arctan x-\\frac{x}{2}+C",
+  "solution": "取 \\(u=\\arctan x\\)，\\(dv=x\\,dx\\)，则 \\(du=\\frac{dx}{1+x^2}\\)，\\(v=\\frac{x^2}{2}\\)。分部积分得 \\(\\frac{x^2}{2}\\arctan x-\\frac12\\int\\frac{x^2}{1+x^2}\\,dx\\)。而 \\(\\frac{x^2}{1+x^2}=1-\\frac1{1+x^2}\\)，积分后整理得结果。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L8-1",
+  "module": "integral",
+  "difficulty": 8,
+  "instruction": "计算定积分",
+  "expression": "\\int_{0}^{\\pi/2}\\frac{dx}{1+\\tan^{2018}x}",
+  "answer": "\\frac{\\pi}{4}",
+  "solution": "令 \\(x=\\frac{\\pi}{2}-t\\)，利用 \\(\\tan(\\frac{\\pi}{2}-t)=\\cot t\\)，得 \\(I=\\int_{0}^{\\pi/2}\\frac{\\tan^{2018}t}{1+\\tan^{2018}t}\\,dt\\)。与原式相加得 \\(2I=\\int_{0}^{\\pi/2}1\\,dt=\\frac{\\pi}{2}\\)，故 \\(I=\\frac{\\pi}{4}\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L8-2",
+  "module": "integral",
+  "difficulty": 8,
+  "instruction": "计算不定积分",
+  "expression": "\\int x\\arctan x\\,dx",
+  "answer": "\\frac{x^2+1}{2}\\arctan x-\\frac{x}{2}+C",
+  "solution": "令 \\(u=\\arctan x\\)，\\(dv=x\\,dx\\)，则 \\(du=\\frac{dx}{1+x^2}\\)，\\(v=\\frac{x^2}{2}\\)。分部积分得 \\(\\frac{x^2}{2}\\arctan x-\\frac12\\int\\frac{x^2}{1+x^2}\\,dx\\)。利用 \\(\\frac{x^2}{1+x^2}=1-\\frac1{1+x^2}\\) 化简即得结果。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L8-3",
+  "module": "integral",
+  "difficulty": 8,
+  "instruction": "计算不定积分",
+  "expression": "\\int \\frac{dx}{x\\sqrt{x^2+x+1}}",
+  "answer": "-\\ln\\left|\\frac{1+\\sqrt{x^2+x+1}}{x}+\\frac12\\right|+C",
+  "solution": "令 \\(t=\\frac1x\\)，则 \\(dx=-\\frac{dt}{t^2}\\)，积分化为 \\(-\\int \\frac{dt}{\\sqrt{1+t+t^2}}\\)。再配方 \\(1+t+t^2=(t+\\frac12)^2+\\frac34\\)，用标准公式积分后回代 \\(t=\\frac1x\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L8-4",
+  "module": "integral",
+  "difficulty": 8,
+  "instruction": "计算不定积分",
+  "expression": "\\int \\frac{dx}{1+\\sin x+\\cos x}",
+  "answer": "\\ln\\left|1+\\tan\\frac{x}{2}\\right|+C",
+  "solution": "令 \\(t=\\tan\\frac{x}{2}\\)，则 \\(\\sin x=\\frac{2t}{1+t^2}\\)，\\(\\cos x=\\frac{1-t^2}{1+t^2}\\)，\\(dx=\\frac{2}{1+t^2}dt\\)。代入化简得 \\(\\int \\frac{dt}{1+t}\\)，积分后再回代 \\(t=\\tan\\frac{x}{2}\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L10-2",
+  "module": "integral",
+  "difficulty": 10,
+  "instruction": "计算不定积分",
+  "expression": "\\int \\frac{dx}{x\\sqrt{x^2+x+1}}",
+  "answer": "-\\ln\\left|\\frac{1+\\sqrt{x^2+x+1}}{x}+\\frac12\\right|+C",
+  "solution": "令 \\(t=\\frac1x\\)，则 \\(dx=-\\frac{dt}{t^2}\\)，积分化为 \\(-\\int \\frac{dt}{\\sqrt{1+t+t^2}}\\)。再配方并用标准公式即可。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L10-3",
+  "module": "integral",
+  "difficulty": 10,
+  "instruction": "计算不定积分",
+  "expression": "\\int \\frac{dx}{1+\\sin x+\\cos x}",
+  "answer": "\\ln\\left|1+\\tan\\frac{x}{2}\\right|+C",
+  "solution": "令 \\( t=\\tan\\frac{x}{2} \\)，则 \\( \\sin x=\\frac{2t}{1+t^2} \\)，\\( \\cos x=\\frac{1-t^2}{1+t^2} \\)，\\( dx=\\frac{2}{1+t^2}dt \\)。代入化简得 \\( \\int \\frac{dt}{1+t} \\)，积分得 \\( \\ln|1+t|+C \\)，回代即得结果。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L10-4",
+  "module": "integral",
+  "difficulty": 10,
+  "instruction": "计算不定积分",
+  "expression": "\\int \\frac{x^4+1}{x^6+1}\\,dx",
+  "answer": "\\arctan x+\\frac{1}{3}\\arctan(x^3)+C",
+  "solution": "利用 \\(x^6+1=(x^2+1)(x^4-x^2+1)\\)，将分子拆分：\\(x^4+1=(x^4-x^2+1)+x^2\\)，从而化为两个标准积分。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L12-2",
+  "module": "integral",
+  "difficulty": 12,
+  "instruction": "计算不定积分",
+  "expression": "\\int \\frac{dx}{1+\\sin x+\\cos x}",
+  "answer": "\\ln\\left|1+\\tan\\frac{x}{2}\\right|+C",
+  "solution": "令 \\(t=\\tan\\frac{x}{2}\\)，则 \\(\\sin x=\\frac{2t}{1+t^2}\\)，\\(\\cos x=\\frac{1-t^2}{1+t^2}\\)，\\(dx=\\frac{2}{1+t^2}dt\\)。代入化简得 \\(\\int \\frac{dt}{1+t}\\)，积分后回代即可。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L12-4",
+  "module": "integral",
+  "difficulty": 12,
+  "instruction": "计算定积分",
+  "expression": "\\int_{0}^{\\pi/2}\\frac{dx}{1+\\tan^{2024}x}",
+  "answer": "\\frac{\\pi}{4}",
+  "solution": "令 \\(x=\\frac{\\pi}{2}-t\\)，则 \\(dx=-dt\\)，且 \\(\\tan x=\\cot t\\)，原积分化为 \\(\\int_{0}^{\\pi/2}\\frac{\\tan^{2024}t}{1+\\tan^{2024}t}\\,dt\\)。与原式相加得 \\(2I=\\int_{0}^{\\pi/2}1\\,dt=\\frac{\\pi}{2}\\)，故 \\(I=\\frac{\\pi}{4}\\)。"
+ },
+ {
+  "round": "r1x",
+  "id": "integral-L12-3",
+  "module": "integral",
+  "difficulty": 12,
+  "instruction": "计算不定积分",
+  "expression": "\\int \\frac{x^4+1}{x^6+1}\\,dx",
+  "answer": "\\arctan x+\\frac{1}{3}\\arctan(x^3)+C",
+  "solution": "利用 \\(x^6+1=(x^2+1)(x^4-x^2+1)\\)，并将分子拆配为 \\(x^4+1=(x^4-x^2+1)+x^2\\)，得 \\(\\frac{x^4+1}{x^6+1}=\\frac{1}{x^2+1}+\\frac{x^2}{x^6+1}\\)。于是 \\(\\int \\frac{dx}{x^2+1}=\\arctan x\\)，且 \\(\\int \\frac{x^2}{x^6+1}\\,dx=\\frac13\\int \\frac{d(x^3)}{(x^3)^2+1}=\\frac13\\arctan(x^3)\\)。"
+ }
+]
