@@ -51,7 +51,12 @@
     GENERATION_REJECTED: 'GENERATION_REJECTED',
     GENERATION_FORMAT_ERROR: 'GENERATION_FORMAT_ERROR',
     VERIFICATION_STALE: 'VERIFICATION_STALE',
+    /* 形态读不懂 → 引擎没能力为答案背书（Tier C）。 */
     UNVERIFIED_SHAPE: 'UNVERIFIED_SHAPE',
+    /* 形态读得懂，但这一次数值没给出结论（Tier B）。
+       和 UNVERIFIED_SHAPE 分开报，是因为两者的处置策略不同：
+       前者要改题型约束，后者只要重抽样/换数字。 */
+    UNVERIFIED_ANSWER: 'UNVERIFIED_ANSWER',
     CANONICAL_MUTATED: 'CANONICAL_MUTATED',
     FALLBACK_USED: 'FALLBACK_USED'
   };
@@ -65,6 +70,17 @@
     REJECTED: 'REJECTED',
     UNCERTAIN: 'UNCERTAIN'
   };
+
+  /* 闸门策略的指纹（Task 5K）。
+
+     为什么不直接改 VERSION：`quality-v2` 是**协议契约**（前端拿它逐次校验响应，
+     改了会让 tests/pipeline-v3.cjs 的夹具变红）。而这次改的是「同一个引擎版本
+     内部的判据」，属于策略变更，不是契约变更。
+
+     于是照 Task #4 用 `judge_layer` 的那个办法：给响应加一个新字段。
+     旧后端不可能凭空产出它 —— 这正是「以为部署了、其实没部署」的解毒剂。
+     查法：GET <后端>/api/deepseek?health=1 → 找 "gate_policy"。 */
+  const GATE_POLICY = 'strict-tier-b';
 
   /* 题目形态分级（Task 5B）：
        A  结构可读，且确定性验证给出了结论（equivalent / not_equivalent）
@@ -573,6 +589,15 @@
     t = t.replace(/\\(?:left|right)/g, '');
     t = t.replace(/\\operatorname\s*\{([^{}]*)\}/g, ' $1 ');
     t = t.replace(/\\\[|\\\]|\\\(|\\\)|\$/g, ' ');
+
+    /* 数学里的 [ ] 就是分组，和 ( ) 同义：y=A^{v}\left[\ln A - B\right]
+       这类幂指函数答案里它是**外层因子**的括号，不认它整条答案直接 unparseable
+       （tokenizer 的白名单里没有方括号），于是 Tier B 兜不住 → 一份正确答案被浪费掉。
+
+       必须放在上面那条 \[ \] 之后：那是 display-math 定界符，要清成空格，
+       不能当分组括号。剩下的裸 [ ] 才是分组。
+       未配对的括号只会让 compile 失败 → 仍旧 uncertain，是保守方向。 */
+    t = t.replace(/\[/g, '(').replace(/\]/g, ')');
 
     t = expandAbs(t);
 
@@ -1915,6 +1940,33 @@
     return { ok: true, needsSecondaryReview: confidence < CONFIDENCE_TRUSTED };
   }
 
+  /* 「引擎验到了什么」→ 闸门三态的**唯一**映射。
+
+     生成侧与后端 reviewer 都必须走这一条：同一个判断在两处各写一遍，
+     正是「本地全绿、线上照旧」那类事故的成因（见 check:sync 的注释）。
+
+     判定表（Task 5K，2026-09-21）：
+       equivalent       引擎独立算过，和标准答案一致      → VERIFIED
+       not_equivalent   引擎独立算过，和标准答案不一致    → REJECTED
+       uncertain/读不懂 引擎没给出结论                    → UNCERTAIN
+
+     关键：**Tier B 不再是 VERIFIED**。Tier B 的定义就是「结构读得懂、
+     这一次数值没收敛」，它和 Tier C 一样是「我们没验证过」。
+     此前把 tier !== C 一律当 VERIFIED，等于让「没被验证过的标准答案」
+     靠审核员的几个布尔就进了学生端 —— 线上那两道错答案
+      （y=((x²+1)/(x²−1))^(arctan x) 的两种写法）正是从这里漏出去的。
+
+     注意这只管生成闸门。判题侧走 approved()，那里的口径刻意更松
+     （UNCERTAIN 放行），因为用户正在做的题不能因为「机器验不了」被作废。 */
+  function gateStateFromProfile(profile) {
+    if (!profile || !profile.readable) return GATE.UNCERTAIN;
+
+    if (profile.verdict === 'equivalent') return GATE.VERIFIED;
+    if (profile.verdict === 'not_equivalent') return GATE.REJECTED;
+
+    return GATE.UNCERTAIN;
+  }
+
   function gateDecision(q) {
     const local = issues(q);
 
@@ -1941,18 +1993,32 @@
        引擎到底有没有独立验证过这道题的标准答案？
 
        Task 5C：对高风险数学内容，UNCERTAIN ≠ APPROVE。
-       形态读不懂（Tier C）就等于「没验证过」—— 此时放行，靠的是模型自己的
-       话，而线上 4/41 的错误标准答案恰恰是从这里漏出去的。
-       所以 Tier C 在生成闸门这里不放行，调用方应当退到已校验的备用题库。
+       Task 5K：Tier B 也算 UNCERTAIN —— 「读得懂但这轮没结论」不是验证通过。
        少一道动态生成题可以接受，错一道进用户端不行。 */
     const profile = verificationProfile(q);
+    const state = gateStateFromProfile(profile);
 
-    if (profile.tier === TIER.C) {
+    if (state === GATE.REJECTED) {
+      /* 正常情况下 issues() 已经用 ANSWER_FAILS_VERIFICATION 拦住了这一支；
+         这里是纵深防御 —— 万一将来 issues() 的形状检查放宽了，闸门自己也不会漏。 */
+      return {
+        ok: false,
+        state: GATE.REJECTED,
+        code: CODES.ANSWER_FAILS_VERIFICATION,
+        tier: profile.tier,
+        verdict: profile.verdict,
+        reason: 'engine disagrees with canonical answer'
+      };
+    }
+
+    if (state === GATE.UNCERTAIN) {
       return {
         ok: false,
         state: GATE.UNCERTAIN,
-        code: CODES.UNVERIFIED_SHAPE,
+        // 读不懂形态 vs 读得懂但没结论 —— 分开报，两类的修法不同。
+        code: profile.readable ? CODES.UNVERIFIED_ANSWER : CODES.UNVERIFIED_SHAPE,
         tier: profile.tier,
+        verdict: profile.verdict,
         reason: profile.reason,
         // 不是「题目有问题」，是「机器验不了」—— 上层据此走 fallback，而不是报异常。
         unverified: true
@@ -2084,12 +2150,14 @@
     fingerprint,
     issues,
     hardGate,
+    gateStateFromProfile,
     gateDecision,
     gateApproved,
     approved,
     shapeSupport,
     verificationProfile,
     GATE,
+    GATE_POLICY,
     TIER,
     JUDGE_REASONS,
     judgeOutcome

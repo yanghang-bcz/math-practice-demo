@@ -341,6 +341,26 @@
   };
 
 
+  /* 「引擎没独立验证过」这一类闸门结论 —— 处置是退到备用题，而不是报异常。
+     Tier C（题干形态读不懂）与 Tier B（读得懂、但这一次数值没收敛）在报告里
+     必须分开，前端处置却是同一个：不展示，换备用题。
+     Task 5K：Tier B 从此也走这条路（此前它被当成 VERIFIED 放行）。 */
+  function isUnverifiedCode(
+    code
+  ) {
+    return (
+      code ===
+        MathQuality
+          .CODES
+          .UNVERIFIED_SHAPE ||
+      code ===
+        MathQuality
+          .CODES
+          .UNVERIFIED_ANSWER
+    );
+  }
+
+
   /* 单条日志。字段一律显式给全（缺的写 null），不要只在「有值的时候」才出现 ——
      日志字段时有时无，聚合脚本就没法写。 */
   function diagLog(
@@ -5107,8 +5127,8 @@
         const decision = MathQuality.gateDecision(q);
 
         const error = new Error(
-          decision.code === MathQuality.CODES.UNVERIFIED_SHAPE
-            ? '题目形态无法独立验证，已改用备用题'
+          isUnverifiedCode(decision.code)
+            ? '题目无法独立验证，已改用备用题'
             : '题目未通过独立质量审核'
         );
 
@@ -5320,7 +5340,7 @@
           ? FAILURE_KINDS.GENERATE_PROTOCOL
           : error?.code === 'GENERATE_EMPTY'
             ? FAILURE_KINDS.GENERATE_EMPTY
-            : error?.code === MathQuality.CODES.UNVERIFIED_SHAPE
+            : isUnverifiedCode(error?.code)
               ? FAILURE_KINDS.GENERATE_UNVERIFIED
               : error?.code
                 ? FAILURE_KINDS.GENERATE_REJECTED

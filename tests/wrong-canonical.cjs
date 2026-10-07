@@ -73,7 +73,11 @@ function centeredAround(expression, h) {
 
 /* 类别 4/6：拿候选表达式求导/求值，和被积函数/导数真值对照。
    不定积分的候选要先去掉积分常数 C —— 否则 C 是个未知标识符，
-   整条表达式解析不了，复核会假失败。 */
+   整条表达式解析不了，复核会假失败。
+
+   注意它算的是 **g′** 与 body 对照，所以 body 必须是「导数真值」。
+   对不定积分成立（body 是被积函数）。**对导数题不成立** —— 见下面的
+   functionDerivativeMatches。 */
 function agreesWithDerivative(body, candidate) {
   const f = Q.tryParse(body, 'x');
   const g = Q.tryParse(Q.stripPlusC(Q.rhsOf(candidate)), 'x');
@@ -88,6 +92,33 @@ function agreesWithDerivative(body, candidate) {
     if (!Number.isFinite(expected) || d === null) continue;
     checked += 1;
     if (Math.abs(d - expected) <= 1e-4 * Math.max(1, Math.abs(expected))) ok += 1;
+  }
+
+  return checked ? { checked, ok } : null;
+}
+
+/* 导数题的独立复核：算 **f′**，与候选 g 对照。
+
+   为什么不能直接用上面那个：上面算的是 g′ 比 f。对导数题来说
+   f 是原函数、g 是导函数，于是它在比「f(x) 与 g′(x)」——
+   两个互不相干的量。实测它对**正确答案**同样返回 ok=0
+   （y=x² 配正解 2x、幂指函数配正解都是 0/N），
+   所以 `assert.equal(check.ok, 0)` 恒真，是一条空转的断言。
+   幂指函数那两条语料正是靠这一条反向守卫才真正被钉住的。 */
+function functionDerivativeMatches(body, candidate) {
+  const f = Q.tryParse(body, 'x');
+  const g = Q.tryParse(Q.stripPlusC(Q.rhsOf(candidate)), 'x');
+  if (!f || !g) return null;
+
+  let checked = 0;
+  let ok = 0;
+
+  for (const x of [-1.7, -0.83, 0.29, 0.61, 1.13, 1.9, 2.6]) {
+    const truth = Q.numericDerivative(f, x);
+    const gv = g(x);
+    if (truth === null || !Number.isFinite(gv)) continue;
+    checked += 1;
+    if (Math.abs(truth - gv) <= 1e-4 * Math.max(1, Math.abs(truth))) ok += 1;
   }
 
   return checked ? { checked, ok } : null;
@@ -145,9 +176,22 @@ test('★ 错误类别语料：每一条的「错」都必须能用独立数值�
 
     if (item.className.includes('derivative')) {
       const body = Q.rhsOf(item.expression);
-      const check = agreesWithDerivative(body, item.answer);
+      const check = functionDerivativeMatches(body, item.answer);
       assert.ok(check, label + '：求导复核跑不起来');
       assert.equal(check.ok, 0, label + '：错答案居然等于真导数，语料前提不成立');
+
+      /* 反向守卫：同一个复核必须认得出这条语料的**正解**。
+         没有这一条，一条语义写错的复核（把 f 与 g′ 相比）会让
+         `check.ok === 0` 恒真 —— 语料看着在测，其实什么都没测。
+         这正是 2026-09-21 发现并修掉的那个空转断言。 */
+      const control = functionDerivativeMatches(body, item.correct);
+      assert.ok(control, label + '：正解无法复核，说明复核本身失效');
+      assert.equal(
+        control.ok,
+        control.checked,
+        label + '：复核认不出正解（' + control.ok + '/' + control.checked +
+          '）—— 上面那条断言是空转的'
+      );
       continue;
     }
 

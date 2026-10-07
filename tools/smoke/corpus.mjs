@@ -100,6 +100,42 @@ export const WRONG_CANONICAL = [
     solution: '由幂函数求导法则得 \\\\(3x\\\\)。',
     evidence: 'd/dx x² = 2x。系数写错，是生成侧最常见的错误类别。',
     correct: '2x'
+  },
+  {
+    /* 2026-09-20 线上 200 题评测抓到的第 1 道（r1 轮次）。
+       幂指函数 y=A^{v} 的对数求导，第二项少乘了 arctan x 这个因子。
+       Task 5K 之前它被放行的原因很具体：答案里的 \left[...\right] 让整条
+       表达式 unparseable → 确定性引擎只能给 uncertain → Tier B 被当成 VERIFIED。 */
+    id: 'derivative-power-exp-missing-factor',
+    className: 'derivative-missing-factor',
+    module: 'derivative',
+    topic: '幂指函数求导',
+    instruction: '求导数',
+    expression: 'y=\\left(\\frac{x^2+1}{x^2-1}\\right)^{\\arctan x}',
+    answer: '\\left(\\frac{x^2+1}{x^2-1}\\right)^{\\arctan x}\\left[\\frac{\\ln\\left(\\frac{x^2+1}{x^2-1}\\right)}{1+x^2}-\\frac{4x}{(x^2+1)(x^2-1)}\\right]',
+    solution: '取对数后两边求导，整理后乘回 y 得到导数表达式。',
+    evidence: '对数求导：y′ = y·[lnA/(1+x²) − 4x·arctan x/(x⁴−1)]，其中 A=(x²+1)/(x²−1)。' +
+      '该答案的第二项写成 −4x/((x²+1)(x²−1))，即 −4x/(x⁴−1)，把 arctan x 因子整个丢了。' +
+      '数值核对（|x|>1 的采样点）：x=1.13 处真值 f′=−30.5911，该答案给 −37.1438（偏 21.4%）；' +
+      'x=1.9 处真值 −1.0440，该答案给 −0.9429。最大相对偏差 89%。',
+    correct: '\\left(\\frac{x^2+1}{x^2-1}\\right)^{\\arctan x}\\left[\\frac{\\ln\\left(\\frac{x^2+1}{x^2-1}\\right)}{1+x^2}-\\frac{4x\\arctan x}{x^4-1}\\right]'
+  },
+  {
+    /* 同一道题的同一「题面」，另一轮（r2）生成的答案。
+       两份错答是两种不同的错法：这一份把第二项的符号写反了。
+       记录它是因为「同一题面不同轮次给出不同答案」本身就是不稳定信号。 */
+    id: 'derivative-power-exp-flipped-term-sign',
+    className: 'derivative-wrong-term-sign',
+    module: 'derivative',
+    topic: '幂指函数求导',
+    instruction: '求导数',
+    expression: 'y=\\left(\\frac{x^2+1}{x^2-1}\\right)^{\\arctan x}',
+    answer: "y'=\\left(\\frac{x^2+1}{x^2-1}\\right)^{\\arctan x}\\left[\\frac{\\ln\\left(\\frac{x^2+1}{x^2-1}\\right)}{1+x^2}+\\frac{4x\\arctan x}{x^4-1}\\right]",
+    solution: '取对数得 ln y = arctan x · ln A，再对 x 求导。',
+    evidence: '正确形式为 y·[lnA/(1+x²) − 4x·arctan x/(x⁴−1)]；该答案把第二项写成 +。' +
+      '数值核对：x=1.13 处真值 −30.5911、该答案给 +41.6006；x=1.9 处真值 −1.0440、该答案给 +1.5019' +
+      ' —— 每个采样点都反号，最大相对偏差 244%。',
+    correct: '\\left(\\frac{x^2+1}{x^2-1}\\right)^{\\arctan x}\\left[\\frac{\\ln\\left(\\frac{x^2+1}{x^2-1}\\right)}{1+x^2}-\\frac{4x\\arctan x}{x^4-1}\\right]'
   }
 ];
 

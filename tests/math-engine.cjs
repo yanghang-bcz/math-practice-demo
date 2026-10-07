@@ -179,6 +179,117 @@ test('gate: 过期版本的 verification 必须失效', () => {
 });
 
 /* ---------------------------------------------------------------
+   Task 5K（2026-09-21）：Tier B 不再是 VERIFIED
+   ---------------------------------------------------------------
+   Tier B 的定义是「结构读得懂、但这一次数值没给出结论」。
+   此前闸门只拦 Tier C（读不懂），于是 Tier B 一律拿到 VERIFIED ——
+   等于让「引擎从未独立验证过的标准答案」靠审核员的几个布尔进学生端。
+   线上 200 题评测里那两道幂指函数错答案正是从这里漏出去的。 */
+
+/* 构造一道真正的 Tier B：y=x^2 的答案取 2|x|。
+   x>0 的采样点与真导数吻合、x<0 的全错 → 引擎只拿到一半证据 → uncertain。 */
+function tierBFixture() {
+  return {
+    module: 'derivative',
+    topic: '分段绝对值求导',
+    instruction: '求导数',
+    expression: S`y=x^2`,
+    answer: '2|x|',
+    solution: S`用幂函数求导法则。`
+  };
+}
+
+function verifiedFixture(q) {
+  return {
+    version: Q.VERSION,
+    question_valid: true,
+    answer_correct: true,
+    solution_correct: true,
+    answer_solution_consistent: true,
+    topic_match: true,
+    difficulty_reasonable: true,
+    confidence: 0.95,
+    issues: [],
+    content: Q.content(q)
+  };
+}
+
+test('★ gate: Tier B（读得懂但这一次数值没结论）不得放行', () => {
+  const q = tierBFixture();
+  const profile = Q.verificationProfile(q);
+
+  assert.strictEqual(profile.tier, 'B', '夹具应当落在 Tier B：' + JSON.stringify(profile));
+  assert.strictEqual(profile.verdict, 'uncertain', 'Tier B 的判定必须是 uncertain');
+
+  const decision = Q.gateDecision({ ...q, verification: verifiedFixture(q) });
+
+  assert.strictEqual(decision.ok, false, 'Tier B 不得过生成闸门：' + JSON.stringify(decision));
+  assert.strictEqual(decision.state, Q.GATE.UNCERTAIN);
+  assert.strictEqual(decision.code, Q.CODES.UNVERIFIED_ANSWER, 'Tier B 与 Tier C 的原因码必须分开');
+  assert.strictEqual(decision.unverified, true, '语义是「机器验不了」，上层据此走 fallback');
+});
+
+test('★ gate: Tier B 不放行，但判题侧口径不得跟着变严', () => {
+  const q = tierBFixture();
+  const withV = { ...q, verification: verifiedFixture(q) };
+
+  assert.strictEqual(Q.gateApproved(withV), false, '生成侧：不放行');
+  assert.strictEqual(
+    Q.approved(withV),
+    true,
+    '判题侧：UNCERTAIN 必须仍然可用 —— 用户正在做的题不能因为机器验不了被作废'
+  );
+});
+
+test('★ gate: 幂指函数 y=((x²+1)/(x²−1))^(arctan x) —— 两份线上错答案被拒、正解放行', () => {
+  const EXPR = S`y=\left(\frac{x^2+1}{x^2-1}\right)^{\arctan x}`;
+  const BRACKET = S`\left(\frac{x^2+1}{x^2-1}\right)^{\arctan x}\left[\frac{\ln\left(\frac{x^2+1}{x^2-1}\right)}{1+x^2}`;
+  const TAIL = S`\right]`;
+
+  // r1 轮次：第二项少乘 arctan x（−4x/((x²+1)(x²−1)) 就是 −4x/(x⁴−1)）
+  const missingFactor = BRACKET + S`-\frac{4x}{(x^2+1)(x^2-1)}` + TAIL;
+  // r2 轮次：第二项符号写反
+  const flippedSign = S`y'=` + BRACKET + S`+\frac{4x\arctan x}{x^4-1}` + TAIL;
+  // 正解
+  const correct = BRACKET + S`-\frac{4x\arctan x}{x^4-1}` + TAIL;
+
+  const build = answer => ({
+    module: 'derivative',
+    topic: '幂指函数求导',
+    instruction: '求导数',
+    expression: EXPR,
+    answer,
+    solution: S`取对数后两边求导，再乘回 y。`
+  });
+
+  for (const [label, answer] of [
+    ['r1 缺 arctan x 因子', missingFactor],
+    ['r2 第二项符号写反', flippedSign]
+  ]) {
+    const q = build(answer);
+    const decision = Q.gateDecision({ ...q, verification: verifiedFixture(q) });
+
+    assert.strictEqual(
+      decision.state,
+      Q.GATE.REJECTED,
+      label + ' 必须被拒，实际 ' + JSON.stringify(decision)
+    );
+    assert.strictEqual(decision.ok, false, label + ' 不得过闸门');
+  }
+
+  // 正解必须放行 —— 否则就是拿「误杀」换「不漏杀」
+  const good = build(correct);
+  const goodDecision = Q.gateDecision({ ...good, verification: verifiedFixture(good) });
+
+  assert.strictEqual(
+    goodDecision.state,
+    Q.GATE.VERIFIED,
+    '正解被误杀：' + JSON.stringify(goodDecision)
+  );
+  assert.strictEqual(goodDecision.verdict, 'equivalent');
+});
+
+/* ---------------------------------------------------------------
    文本→表达式：曾让整批正确答案被判「无法判定」的两个解析缺陷
    --------------------------------------------------------------- */
 

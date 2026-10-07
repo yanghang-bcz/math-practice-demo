@@ -130,6 +130,11 @@ function healthPayload(configured) {
     reviewer_version: PIPELINE.reviewer,
     judge_version: PIPELINE.judge,
     math_engine_version: PIPELINE.math_engine,
+    /* Task 5K 部署指纹：旧后端没有这个字段。
+       线上核查「生成闸门有没有换成 strict-tier-b」只看这一处，不要去猜
+       「响应里出现了 UNVERIFIED_ANSWER 说明部署了」—— 那要等一道 Tier B 的题
+       才碰得到（线上 200 题样本里 Tier B 恰好是 0 条）。 */
+    gate_policy: Quality.GATE_POLICY,
     pipeline: versions()
   };
 }
@@ -999,7 +1004,12 @@ async function reviewQuestion(apiKey, body) {
   const hard = evaluateHardReview(review, q);
 
   // 形态分级：引擎到底有没有能力独立复核这道题的 canonical answer。
-  // 它不影响审核员的判定，只决定闸门最终给 VERIFIED 还是 UNCERTAIN（Task 5B/5C）。
+  // 它不影响审核员的判定，只决定闸门最终给 VERIFIED / REJECTED / UNCERTAIN。
+  //
+  // Task 5K：这里**不再自己写一份三元表达式**。原先的 `tier === C ? UNCERTAIN
+  // : VERIFIED` 把 Tier B（读得懂但这一次数值没结论）当成了验证通过，
+  // 线上那两道错标准答案就是这么漏出去的。规则统一收在
+  // Quality.gateStateFromProfile，和 Quality.gateDecision 是同一份实现。
   const profile = Quality.verificationProfile(q);
 
   return {
@@ -1008,7 +1018,7 @@ async function reviewQuestion(apiKey, body) {
     pipeline: versions(),
     status: hard.ok ? 'approved' : 'rejected',
     state: hard.ok
-      ? (profile.tier === Quality.TIER.C ? Quality.GATE.UNCERTAIN : Quality.GATE.VERIFIED)
+      ? Quality.gateStateFromProfile(profile)
       : Quality.GATE.REJECTED,
     tier: profile.tier,
     shape: profile.reason,
@@ -1222,6 +1232,10 @@ async function generateQuestions(apiKey, body) {
         attempts: attempt,
         gate_state: approved?.verification_state ?? null,
         tier: approved?.verification_tier ?? null,
+        /* 和 health 里同一个指纹（Task 5K）。放在顶层、不放 versions 里 ——
+           versions 是前端逐次校验的契约对象，形状被测试钉着，
+           往里塞字段等于改协议。 */
+        gate_policy: Quality.GATE_POLICY,
         versions: versions()
       };
 

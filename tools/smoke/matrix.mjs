@@ -50,12 +50,29 @@ export function isFocusCell(module, difficulty) {
   );
 }
 
-/** 展开成逐题列表 */
-export function buildMatrix() {
+/** 展开成逐题列表
+ *
+ * `extraTopics` 允许为某几个模块**临时追加**考点（形如
+ * `{ derivative: ['幂指函数求导'] }`）。存在的理由：默认考点池是按
+ * 「考研常见形态」挑的，池里没有幂指函数 u(x)^v(x) / 对数求导法 ——
+ * 而那正是线上唯一被抓到「标准答案算错还放行」的形态。
+ * 定向复测需要主动把它排进去，否则跑一百道也碰不到一次。
+ *
+ * 只影响本次传参：不传就和历史上那批 200 题完全一致，
+ * 模块/难度维度的可比性不受影响。
+ */
+export function buildMatrix(extraTopics = {}) {
+  const poolOf = module =>
+    TOPICS[module].concat(
+      Array.isArray(extraTopics[module]) ? extraTopics[module] : []
+    );
+
   const out = [];
   let n = 0;
 
   for (const module of MODULES) {
+    const pool = poolOf(module);
+
     for (const difficulty of DIFFICULTIES) {
       const count = COUNTS[module][difficulty] || 0;
       for (let k = 0; k < count; k++) {
@@ -65,7 +82,7 @@ export function buildMatrix() {
           id: `${module}-L${difficulty}-${k + 1}`,
           module,
           difficulty,
-          topic: TOPICS[module][(difficulty / 2 + k) % TOPICS[module].length],
+          topic: pool[(difficulty / 2 + k) % pool.length],
           purpose: 'daily',
           zone: 'target',
           focus: isFocusCell(module, difficulty)

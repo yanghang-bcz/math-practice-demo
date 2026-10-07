@@ -49,6 +49,62 @@ test('矩阵：高难度焦点格（导数/积分 L8+12）合计 24 题', async 
   }
 });
 
+/* ---------------------------------------------------------------
+   Task 5K：定向复测用的「幂指函数」考点追加
+   ---------------------------------------------------------------
+   线上唯一被抓到「标准答案算错还放行」的形态是 y = A(x)^{v(x)}。
+   默认考点池里**没有**这一类，所以普通 50 题矩阵跑多少轮都碰不到它 ——
+   定向复测必须能主动把它排进 derivative 的 L8/L10/L12。
+   两个前提要同时成立：追加只影响本次，默认矩阵必须逐题不变（否则历史数据不可比）。 */
+
+test('矩阵：不传 extraTopics 时与默认完全一致（历史可比性）', async () => {
+  const { buildMatrix, TOPICS } = await import('../tools/smoke/matrix.mjs');
+
+  const base = buildMatrix();
+  assert.strictEqual(base.length, 50);
+
+  // 默认池里确实没有幂指函数/对数求导 —— 这正是需要追加的原因
+  const defaultPowered = base.filter((c) => /幂指函数|对数求导/.test(c.topic));
+  assert.deepStrictEqual(
+    defaultPowered.map((c) => c.id),
+    [],
+    '默认矩阵不该出现幂指函数/对数求导；出现了说明池子被改过，历史数据不可比'
+  );
+
+  for (const module of Object.keys(TOPICS)) {
+    assert.ok(
+      TOPICS[module].every((t) => typeof t === 'string' && t.length),
+      module + ' 的考点池里有非法条目'
+    );
+  }
+
+  // 传空对象等价于不传
+  assert.deepStrictEqual(buildMatrix({}), base);
+});
+
+test('矩阵：--extra-topics 能把幂指函数排进 derivative 的 L8/L10/L12', async () => {
+  const { buildMatrix } = await import('../tools/smoke/matrix.mjs');
+
+  const focused = buildMatrix({ derivative: ['幂指函数求导', '对数求导法'] })
+    .filter((c) => c.module === 'derivative' && c.difficulty >= 8);
+
+  assert.strictEqual(focused.length, 12, 'derivative L8/L10/L12 应当是 12 格');
+
+  const powered = focused.filter((c) => /幂指函数|对数求导/.test(c.topic));
+  assert.ok(
+    powered.length >= 4,
+    `定向集里幂指函数类太少（${powered.length}/12），复测仍然碰不到那个形态`
+  );
+
+  // 另外两个模块不受影响
+  const limitTopics = new Set(
+    buildMatrix({ derivative: ['幂指函数求导'] })
+      .filter((c) => c.module === 'limit')
+      .map((c) => c.topic)
+  );
+  assert.ok(![...limitTopics].some((t) => /幂指函数|对数求导/.test(t)), '不该串到 limit 上');
+});
+
 test('错答探针组必须包含「指责参考答案」那条', async () => {
   const { WRONG_PROBES, VALID_PROBES } = await import('../tools/smoke/run.mjs');
 

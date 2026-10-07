@@ -5,9 +5,21 @@
  *   node tools/smoke/run.mjs --label v2
  *   node tools/smoke/run.mjs --limit 3 --evaluate-sample 0   # 小样本自检
  *
+ * 定向复测（Task 5K）：幂指函数 y=A(x)^{v(x)} 是线上唯一被抓到
+ * 「标准答案算错却放行」的形态，而默认考点池里没有它 —— 必须显式排进去，
+ * 否则跑多少轮都碰不到：
+ *   node tools/smoke/run.mjs --label task5k-deriv \
+ *     --only derivative-L8,derivative-L10,derivative-L12 \
+ *     --extra-topics 'derivative:幂指函数求导,对数求导法'
+ * 一轮 = 12 格（每个难度 4 格），跑 3 轮即 36 道，落在 30~50 的区间内。
+ *
  * 关键行为：开跑前先查 ?health=1。如果后端没带 protocol_version，说明它是
  * 改造前的旧版 —— 脚本会直接停下来，除非显式给 --allow-old-server。
  * 这是被「以为部署了、其实没部署」坑过一次之后加的。
+ *
+ * 报告里的「部署指纹」段另外会看 health 的 `gate_policy`：
+ * 不是 `strict-tier-b` 就说明生成闸门还是 Task 5K 之前的版本，
+ * 那一轮的数字不能当作 P0 验收依据（Tier B 仍可能被当成 VERIFIED 放行）。
  */
 
 import fs from 'node:fs';
@@ -66,6 +78,7 @@ function parseArgs(argv) {
     out: null,
     limit: 0,
     only: null,
+    extraTopics: {},
     reuse: null,
     repeat: 3,
     judgeSample: 10,
@@ -83,6 +96,22 @@ function parseArgs(argv) {
     else if (a === '--out') args.out = next();
     else if (a === '--limit') args.limit = Number(next()) || 0;
     else if (a === '--only') args.only = String(next()).split(',').map((s) => s.trim()).filter(Boolean);
+    /* --extra-topics derivative:幂指函数求导,对数求导法
+       给某几个模块**临时追加**考点，只影响本次评测。定向复测幂指函数形态时必须用它：
+       默认池里没有这类题，跑多少道都碰不到。可重复给多个模块。 */
+    else if (a === '--extra-topics') {
+      const spec = String(next());
+      const at = spec.indexOf(':');
+      if (at < 0) {
+        console.error('--extra-topics 需要写成 <module>:<topic1,topic2>，收到：' + spec);
+        process.exit(2);
+      }
+      const module = spec.slice(0, at).trim();
+      const topics = spec.slice(at + 1).split(',').map((s) => s.trim()).filter(Boolean);
+      if (module && topics.length) {
+        args.extraTopics[module] = (args.extraTopics[module] || []).concat(topics);
+      }
+    }
     else if (a === '--reuse') args.reuse = next();
     else if (a === '--repeat') args.repeat = Number(next()) || 3;
     else if (a === '--judge-sample') args.judgeSample = Number(next()) || 0;
@@ -314,7 +343,7 @@ async function main() {
   log('');
 
   /* --- 生成（--reuse 时矩阵留空，pool 立即返回；题目从上次的 jsonl 恢复）--- */
-  let matrix = args.reuse ? [] : buildMatrix();
+  let matrix = args.reuse ? [] : buildMatrix(args.extraTopics);
   if (args.only) {
     matrix = matrix.filter((c) =>
       args.only.some((p) => c.id.startsWith(p) || `${c.module}-L${c.difficulty}` === p)
@@ -1006,6 +1035,19 @@ function renderMarkdown(report) {
       ? `- 判题响应带 \`judge_layer\`：${[...layersSeen].sort().join(', ')} → 线上是 Task #4 之后的判题。`
       : '- ⚠️ 判题响应里**没有** `judge_layer` 字段 → 线上判题还是 Task #4 之前的版本，' +
         '下面的「确定性覆盖率」数字与这次改动无关，不能当作验收依据。'
+  );
+
+  /* Task 5K：生成闸门换成 strict-tier-b 之后，Tier B 不再被放行。
+     这一项必须**显式**报，不能靠「有没有出现 UNVERIFIED_ANSWER」去推断 ——
+     那要正好抽到一道 Tier B 的题才碰得到，线上 200 题样本里 Tier B 是 0 条。 */
+  const gatePolicy = report.meta?.health?.gate_policy ?? null;
+
+  p(
+    gatePolicy === 'strict-tier-b'
+      ? '- health 带 `gate_policy: strict-tier-b` → 线上跑的是 Task 5K 之后的生成闸门。'
+      : `- ⚠️ health 里 \`gate_policy\` = ${JSON.stringify(gatePolicy)}（期望 "strict-tier-b"）` +
+        ' → 线上还是 Task 5K 之前的生成闸门，Tier B 仍可能被当成 VERIFIED 放行，' +
+        '本次结果不能作为 P0 验收依据。'
   );
   p();
 
