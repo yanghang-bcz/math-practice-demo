@@ -1,0 +1,11 @@
+{
+  "updateAbility": true,
+  "updateTopicMastery": true,
+  "makeDailyPlan": true,
+  "chooseWeakTopic": true,
+  "correctProbability": true,
+  "updateReviewItem": true,
+  "diagnosisPlan": true,
+  "migrateLegacyState": true,
+  "dueReviews": true
+}

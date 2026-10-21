@@ -1,0 +1,23 @@
+[
+  {
+    "name": "packaged backend boots and health contract matches",
+    "pass": true
+  },
+  {
+    "name": "concurrent requests and completed replay produce only one draft+review pair",
+    "pass": true
+  },
+  {
+    "name": "different input with same ID cannot trigger a second upstream operation",
+    "pass": true
+  },
+  {
+    "name": "actual HTTP entry returns structured timeout with upstream abort",
+    "pass": true,
+    "elapsed_ms": 608.308875
+  },
+  {
+    "name": "malformed request is 400 instead of infrastructure500",
+    "pass": true
+  }
+]

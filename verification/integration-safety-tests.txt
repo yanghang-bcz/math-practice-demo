@@ -1,0 +1,27 @@
+✔ api/deepseek.js: concurrent and replayed generation IDs share one upstream operation (18.869417ms)
+✔ api/deepseek.js: reused ID with different input is rejected before another model call (1.422ms)
+✔ api/deepseek.js: failed result is replayed without another paid operation (1.665959ms)
+✔ api/deepseek.js: ingress elapsed time consumes request budget (27.576125ms)
+✔ api/deepseek.js: health advertises additive contract without changing protocol or math policy (0.582875ms)
+✔ cloudbase/deepseek/index.js: concurrent and replayed generation IDs share one upstream operation (12.272ms)
+✔ cloudbase/deepseek/index.js: reused ID with different input is rejected before another model call (0.956166ms)
+✔ cloudbase/deepseek/index.js: failed result is replayed without another paid operation (0.628917ms)
+✔ cloudbase/deepseek/index.js: ingress elapsed time consumes request budget (27.181875ms)
+✔ cloudbase/deepseek/index.js: health advertises additive contract without changing protocol or math policy (0.684917ms)
+✔ generation cannot auto-resubmit even if a caller overrides attempts (8.095666ms)
+✔ old and new state readers preserve learning records and optional delivery metadata (2.2255ms)
+✔ old frontend + old backend keeps success and typed rejection compatible (1.787959ms)
+✔ old frontend + new backend keeps success and typed rejection compatible (1.147916ms)
+✔ new frontend + old backend keeps success and typed rejection compatible (2.565209ms)
+✔ new frontend + new backend keeps success and typed rejection compatible (2.427084ms)
+✔ request identities are unique across page contexts in the same millisecond (8.49425ms)
+✔ metrics measure actual displayed slots and keep quality separate from network (3.646875ms)
+✔ missing denominators and undelivered starts are not hidden by HTTP success (0.213458ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 188.708708

@@ -1,0 +1,57 @@
+[
+  {
+    "name": "quality rejection shows fallback without connection failure and counted once",
+    "pass": true,
+    "duration_ms": 688
+  },
+  {
+    "name": "real browser aborted requests classified as network",
+    "pass": true,
+    "duration_ms": 469
+  },
+  {
+    "name": "simultaneous ensures use one foreground call; successful AI remains stable",
+    "pass": true,
+    "duration_ms": 271
+  },
+  {
+    "name": "compatible completed prefetch survives topic replan",
+    "pass": true,
+    "duration_ms": 61
+  },
+  {
+    "name": "failed warmup evicted and next foreground recovers",
+    "pass": true,
+    "duration_ms": 471
+  },
+  {
+    "name": "three consecutive answered fallback questions rotate bank IDs",
+    "pass": true,
+    "duration_ms": 1871
+  },
+  {
+    "name": "committed fallback cannot be overwritten by an earlier delayed AI response",
+    "pass": true,
+    "duration_ms": 314
+  },
+  {
+    "name": "leaving a session prevents late AI from writing into the replacement",
+    "pass": true,
+    "duration_ms": 273
+  },
+  {
+    "name": "all twelve archived successful production responses still pass the strict local gate",
+    "pass": true,
+    "duration_ms": 20
+  },
+  {
+    "name": "new frontend accepts old backend quality500 without retry or connection warning",
+    "pass": true,
+    "duration_ms": 483
+  },
+  {
+    "name": "collector records DOM delivery and first wait locally without credentials",
+    "pass": true,
+    "duration_ms": 744
+  }
+]
