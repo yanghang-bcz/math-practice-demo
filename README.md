@@ -7,7 +7,7 @@
 </p>
 
 <p>
-  <a href="https://calcdaily-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/">
+  <a href="calcdaily.cn">
     <strong>在线体验 →</strong>
   </a>
   &nbsp;&nbsp;&nbsp;
