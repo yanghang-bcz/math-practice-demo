@@ -50,7 +50,7 @@ test('★ 出题等待必须有上界：不再出现 180~190 秒的等待',()=>{
 });
 
 test('重试次数与退避区间是明确的，不是随手写的数',()=>{
-  assert.equal(API_RETRY.generate.attempts,2,'出题应当允许一次重试');
+  assert.equal(API_RETRY.generate.attempts,1,'生成响应丢失不能自动重提，恢复由服务端编排');
   assert.equal(API_RETRY.judge.attempts,2,'判题应当允许一次重试');
   assert.equal(API_RETRY.evaluate.attempts,1,'难度标定失败不影响出题，不必重试');
 
@@ -116,10 +116,10 @@ const status=(code,body={})=>async()=>({
   json:async()=>({error:'boom',...body})
 });
 
-test('★ 连接类失败必须重试一次，并退避 600~1200ms',async()=>{
+test('★ 判题连接类失败重试一次，并退避 600~1200ms',async()=>{
   const h=harness(status(503));
 
-  await assert.rejects(h.c.apiCall('generate',{}));
+  await assert.rejects(h.c.apiCall('judge',{}));
 
   assert.equal(h.requests.length,2,'5xx 只试一次就放弃，等于把一次抖动放大成一次失败');
   assert.equal(h.slept.length,1,'重试之间必须有退避');
@@ -204,7 +204,7 @@ test('★ 整体预算必须掐住「重试 + 超时」的总时长',async()=>{
 });
 
 test('返回体不是 JSON 时报协议错误，且不重试',async()=>{
-  const h=harness(async()=>({ok:true,status:200,json:async()=>{throw new Error('not json');}}));
+  const h=harness(async()=>({ok:true,status:200,json:async()=>{throw new SyntaxError('not json');}}));
 
   await assert.rejects(h.c.apiCall('generate',{}),error=>{
     assert.equal(error.code,'CLIENT_PROTOCOL_ERROR');
@@ -234,7 +234,7 @@ test('每次请求都带 request_id / session_id / question_sequence / attempt',
 test('重试时 request_id 不变、attempt 递增 —— 服务端才认得出这是同一次请求的重试',async()=>{
   const h=harness(status(500));
 
-  await assert.rejects(h.c.apiCall('generate',{}));
+  await assert.rejects(h.c.apiCall('judge',{}));
 
   assert.equal(h.requests[0].body.request_id,h.requests[1].body.request_id);
   assert.equal(h.requests[0].body.attempt,1);

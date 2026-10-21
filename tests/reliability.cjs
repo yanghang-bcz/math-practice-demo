@@ -10,7 +10,7 @@ const draft=()=>({module:'limit',topic:'重要极限',instruction:'计算极限'
 const review=()=>({...Object.fromEntries(Q.fields.map(k=>[k,true])),confidence:.97,issues:[],independent_answer:'1'});
 function approved(q=draft()) {q.verification={...review(),version:Q.VERSION,status:'approved',content:Q.content(q)};q.source='ai';return q;}
 function backend(file) {
- const context=vm.createContext({require:createRequire(path.resolve(file)),module:{exports:{}},process,console,AbortSignal,fetch:async()=>{throw Error('Unexpected real network');},URL});
+ const context=vm.createContext({require:createRequire(path.resolve(file)),module:{exports:{}},process,console,AbortController,AbortSignal,setTimeout,clearTimeout,fetch:async()=>{throw Error('Unexpected real network');},URL});
  let source=fs.readFileSync(file,'utf8');
  if(file.includes('cloudbase'))source=source.replace("server.listen(PORT, '0.0.0.0', () => {","if (false) server.listen(PORT, '0.0.0.0', () => {");
  vm.runInContext(source,context);return context;

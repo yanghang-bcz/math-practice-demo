@@ -1,0 +1,104 @@
+{
+  "functions": {
+    "mergeState": "  function mergeState(\n    parsed\n  ) {\n    const base =\n      deepClone(\n        DEFAULT_STATE\n      );\n\n    return {\n      ...base,\n      ...parsed,\n\n      profile: {\n        ...base.profile,\n        ...(parsed.profile || {}),\n\n        abilityByModule: {\n          ...base\n            .profile\n            .abilityByModule,\n\n          ...(\n            (\n              parsed.profile ||\n              {}\n            )\n              .abilityByModule ||\n            {}\n          )\n        },\n\n        displayLevelByModule: {\n          ...base\n            .profile\n            .displayLevelByModule,\n\n          ...(\n            (\n              parsed.profile ||\n              {}\n            )\n              .displayLevelByModule ||\n            {}\n          )\n        },\n\n        confidenceByModule: {\n          ...base\n            .profile\n            .confidenceByModule,\n\n          ...(\n            (\n              parsed.profile ||\n              {}\n            )\n              .confidenceByModule ||\n            {}\n          )\n        },\n\n        effectiveAttemptsByModule: {\n          ...base\n            .profile\n            .effectiveAttemptsByModule,\n\n          ...(\n            (\n              parsed.profile ||\n              {}\n            )\n              .effectiveAttemptsByModule ||\n            {}\n          )\n        }\n      },\n\n\n      settings: {\n        ...base.settings,\n        ...(parsed.settings || {}),\n\n        manualLevels: {\n          ...base\n            .settings\n            .manualLevels,\n\n          ...(\n            (\n              parsed.settings ||\n              {}\n            )\n              .manualLevels ||\n            {}\n          )\n        }\n      },\n\n\n      difficultyModel: {\n        ...base\n          .difficultyModel,\n\n        ...(\n          parsed\n            .difficultyModel ||\n          {}\n        )\n      },\n\n\n      stats: {\n        ...base.stats,\n        ...(parsed.stats || {}),\n\n        byModule: {\n          ...base\n            .stats\n            .byModule,\n\n          ...(\n            (\n              parsed.stats ||\n              {}\n            )\n              .byModule ||\n            {}\n          )\n        },\n\n        byTopic: {\n          ...(\n            (\n              parsed.stats ||\n              {}\n            )\n              .byTopic ||\n            {}\n          )\n        }\n      },\n\n\n      reviews:\n        Array.isArray(\n          parsed.reviews\n        )\n          ? parsed.reviews\n          : [],\n\n      history:\n        Array.isArray(\n          parsed.history\n        )\n          ? parsed.history\n          : [],\n\n      checkins:\n        Array.isArray(\n          parsed.checkins\n        )\n          ? parsed.checkins\n          : []\n    };\n  }\n\n",
+    "nextRequestId": "  function nextRequestId(\n    prefix = 'req'\n  ) {\n    requestCounter += 1;\n\n    return `${prefix}-${Date.now().toString(36)}-${requestCounter.toString(36)}`;\n  }\n\n\n  /* 新的预取请求能不能顶掉旧的：\n     题号更靠后的一定更新（用户已经往前走了）；\n     题号相同时，后发出的那个更新（issued 单调递增）。\n     反过来 —— 旧请求想覆盖新请求，一律拒绝。 */",
+    "retryDelay": "  function retryDelay(\n    retryIndex = 0\n  ) {\n    return Math.round(\n      RETRY_BASE_MS +\n      Math.random() * RETRY_JITTER_MS\n    );\n  }\n\n",
+    "apiTimeoutError": "  function apiTimeoutError(\n    action,\n    timeoutMs\n  ) {\n    const error = new Error(\n      action === 'judge'\n        ? `判题请求超时（${Math.round(timeoutMs / 1000)}s）`\n        : `AI 请求超时（${Math.round(timeoutMs / 1000)}s）`\n    );\n\n    error.name = 'TimeoutError';\n    error.code = 'CLIENT_TIMEOUT';\n    error.timeoutMs = timeoutMs;\n    error.httpStatus = null;\n\n    return error;\n  }\n\n",
+    "apiFailureKind": "  function apiFailureKind(\n    action,\n    error\n  ) {\n    const judge =\n      action === 'judge';\n\n    if (error?.httpStatus) {\n      return judge\n        ? FAILURE_KINDS.JUDGE_HTTP\n        : FAILURE_KINDS.GENERATE_HTTP;\n    }\n\n    if (\n      error?.name === 'AbortError' ||\n      error?.name === 'TimeoutError' ||\n      error?.code === 'CLIENT_TIMEOUT'\n    ) {\n      return judge\n        ? FAILURE_KINDS.JUDGE_TIMEOUT\n        : FAILURE_KINDS.GENERATE_TIMEOUT;\n    }\n\n    if (error?.code === 'CLIENT_PROTOCOL_ERROR') {\n      return judge\n        ? FAILURE_KINDS.JUDGE_PROTOCOL\n        : FAILURE_KINDS.GENERATE_PROTOCOL;\n    }\n\n    return judge\n      ? FAILURE_KINDS.JUDGE_NETWORK\n      : FAILURE_KINDS.GENERATE_NETWORK;\n  }\n\n\n  /* 400/401/403/404 这类错误重试多少次都是同一个结果，直接抛；\n     429、5xx、超时、连接中断才值得再来一次。 */",
+    "apiRetryable": "  function apiRetryable(\n    action,\n    error\n  ) {\n    const status =\n      Number(error?.httpStatus);\n\n    if (\n      Number.isFinite(status) &&\n      error?.httpStatus !== null\n    ) {\n      return (\n        status === 429 ||\n        status === 408 ||\n        status >= 500\n      );\n    }\n\n    if (error?.code === 'CLIENT_PROTOCOL_ERROR') {\n      return false;\n    }\n\n    const timedOut =\n      error?.name === 'AbortError' ||\n      error?.name === 'TimeoutError' ||\n      error?.code === 'CLIENT_TIMEOUT';\n\n    // 出题不重试超时：重试会把等待翻倍，而备用题库立刻就能兜住（见上）\n    if (timedOut && action === 'generate') {\n      return false;\n    }\n\n    return true;\n  }\n\n",
+    "apiCall": "  async function apiCall(\n    action,\n    payload = {},\n    options = {}\n  ) {\n    const timeoutMs =\n      Number(options.timeoutMs) ||\n      API_TIMEOUTS[action] ||\n      25000;\n\n    const attempts =\n      Math.max(\n        1,\n        Number(options.attempts) ||\n        API_RETRY[action]?.attempts ||\n        1\n      );\n\n    const requestId =\n      payload.request_id ||\n      nextRequestId(action);\n\n    const attemptId =\n      nextRequestId('attempt');\n\n    const budgetMs =\n      Number(options.budgetMs) ||\n      API_BUDGETS[action] ||\n      timeoutMs;\n\n    const deadline =\n      Date.now() + budgetMs;\n\n    let lastError =\n      null;\n\n    for (\n      let attempt = 0;\n      attempt < attempts;\n      attempt++\n    ) {\n      if (attempt > 0) {\n        const delay =\n          retryDelay(attempt - 1);\n\n        if (Date.now() + delay + 1000 > deadline) {\n          diagLog({\n            level: 'error',\n            action,\n            event: 'retry_skipped',\n            kind: apiFailureKind(action, lastError),\n            message: '整体预算不足，不再重试',\n            request_id: requestId,\n            attempt_id: attemptId,\n            attempt: attempt + 1,\n            retry_index: attempt,\n            duration_ms: Date.now() - (deadline - budgetMs),\n            outcome: 'budget_exhausted'\n          });\n\n          break;\n        }\n\n        await sleep(\n          delay\n        );\n      }\n\n      const startedAt =\n        Date.now();\n\n      const remaining =\n        deadline - startedAt;\n\n      if (remaining <= 1000) {\n        break;\n      }\n\n      /* 单次超时不超过剩余预算，否则「总预算」只是个装饰。\n         下限 1 秒：低于它的超时会把正常的往返也掐掉，等于把「慢」误报成「断」。 */\n      const attemptTimeout =\n        Math.max(\n          1000,\n          Math.min(timeoutMs, remaining)\n        );\n\n      const controller =\n        new AbortController();\n\n      const timer =\n        setTimeout(\n          () => controller.abort(),\n          attemptTimeout\n        );\n\n      try {\n        const response =\n          await fetch(\n            AI_API_URL,\n            {\n              method: 'POST',\n              signal: controller.signal,\n              headers: { 'Content-Type': 'application/json' },\n              body: JSON.stringify({\n                action,\n                request_id: requestId,\n                session_id: payload.session_id ?? null,\n                question_sequence: payload.question_sequence ?? null,\n                attempt: attempt + 1,\n                ...payload\n              })\n            }\n          );\n\n        const data =\n          await response\n            .json()\n            .catch(\n              () => null\n            );\n\n        if (!response.ok) {\n          const error = new Error(\n            data?.error ||\n            `AI 请求失败 (${response.status})`\n          );\n\n          error.httpStatus =\n            response.status;\n\n          error.code =\n            data?.code || null;\n\n          throw error;\n        }\n\n        if (!data) {\n          const error =\n            new Error('AI 返回体不是 JSON');\n\n          error.code = 'CLIENT_PROTOCOL_ERROR';\n          error.httpStatus = null;\n\n          throw error;\n        }\n\n        diagLog({\n          level: 'info',\n          action,\n          event: 'http_attempt',\n          message: `ok attempt ${attempt + 1}/${attempts}`,\n          request_id: requestId,\n          attempt_id: attemptId,\n          session_id: payload.session_id ?? null,\n          question_sequence: payload.question_sequence ?? null,\n          attempt: attempt + 1,\n          retry_index: attempt,\n          duration_ms: Date.now() - startedAt,\n          http_status: response.status,\n          outcome: 'ok'\n        });\n\n        return data;\n\n      } catch (caught) {\n        const aborted =\n          caught?.name === 'AbortError';\n\n        const error =\n          aborted\n            ? apiTimeoutError(action, attemptTimeout)\n            : caught;\n\n        const retryable =\n          apiRetryable(action, error);\n\n        const willRetry =\n          retryable &&\n          attempt + 1 < attempts;\n\n        diagLog({\n          level: 'error',\n          action,\n          event: 'http_attempt',\n          kind: apiFailureKind(action, error),\n          message: error?.message || String(error),\n          request_id: requestId,\n          attempt_id: attemptId,\n          session_id: payload.session_id ?? null,\n          question_sequence: payload.question_sequence ?? null,\n          attempt: attempt + 1,\n          retry_index: attempt,\n          duration_ms: Date.now() - startedAt,\n          http_status: error?.httpStatus ?? null,\n          outcome: willRetry ? 'retry' : 'failed'\n        });\n\n        lastError = error;\n\n        if (!willRetry) {\n          break;\n        }\n\n      } finally {\n        clearTimeout(timer);\n      }\n    }\n\n    throw lastError ||\n      new Error('AI 请求失败');\n  }\n\n\n  /* ── 协议与版本（Task 5I）────────────────────────────────────\n\n     旧的健康检查只做一件事：res.ok。于是不管线上跑的是哪一版引擎，\n     界面都显示「DeepSeek 已连接」—— 而「连上了」和「连上了一个能按\n     当前规则判题的版本」是两件完全不同的事。\n\n     版本不匹配有两种后果，且都真实发生过：\n       · 出题侧：服务端按旧规则标记 verification，客户端按新规则校验直接\n         判它 stale，用户看到「AI 出题失败，已使用备用题」，但根本原因\n         其实是劈叉部署，而不是模型不行；\n       · 判题侧：旧服务端可能对某些形态给出「确定等价」的结论，而新客户端\n         的引擎根本没法独立复核它 —— 这就是「错答放行」的入口。\n\n     所以：\n       1. 启动时读 health，比对五个版本，结论挂在界面上（不再只说「已连接」）；\n       2. 每一次请求的响应里都带 versions，**逐次**校验。启动时对得上、返回时\n          对不上（灰度、多实例、CDN 缓存）也必须拦。\n     ========================================================= */\n"
+  },
+  "constants": {
+    "DEFAULT_STATE": {
+      "version": 2,
+      "profile": {
+        "diagnosed": false,
+        "diagnosisCompletedAt": null,
+        "placementSource": "default",
+        "abilityByModule": {
+          "limit": 6,
+          "derivative": 6,
+          "integral": 6
+        },
+        "displayLevelByModule": {
+          "limit": 6,
+          "derivative": 6,
+          "integral": 6
+        },
+        "confidenceByModule": {
+          "limit": 0.15,
+          "derivative": 0.15,
+          "integral": 0.15
+        },
+        "effectiveAttemptsByModule": {
+          "limit": 0,
+          "derivative": 0,
+          "integral": 0
+        }
+      },
+      "settings": {
+        "difficultyMode": "adaptive",
+        "manualLevels": {
+          "limit": 6,
+          "derivative": 6,
+          "integral": 6
+        },
+        "trainingMode": "balanced",
+        "dailyCount": 10
+      },
+      "difficultyModel": {
+        "version": "v0-provisional",
+        "calibrated": false,
+        "calibrationPoints": [],
+        "note": "Soft-anchor provisional scale. Waiting for real anchor bank."
+      },
+      "stats": {
+        "attempts": 0,
+        "correct": 0,
+        "byModule": {
+          "limit": {
+            "attempts": 0,
+            "correct": 0
+          },
+          "derivative": {
+            "attempts": 0,
+            "correct": 0
+          },
+          "integral": {
+            "attempts": 0,
+            "correct": 0
+          }
+        },
+        "byTopic": {}
+      },
+      "reviews": [],
+      "history": [],
+      "checkins": [],
+      "activeSession": null,
+      "dailyMeta": {
+        "lastCompletedDate": null
+      }
+    },
+    "API_RETRY": {
+      "generate": {
+        "attempts": 2
+      },
+      "judge": {
+        "attempts": 2
+      },
+      "evaluate": {
+        "attempts": 1
+      }
+    },
+    "API_TIMEOUTS": {
+      "generate": 60000,
+      "judge": 22000,
+      "evaluate": 25000
+    },
+    "API_BUDGETS": {
+      "generate": 90000,
+      "judge": 45000,
+      "evaluate": 25000
+    }
+  }
+}

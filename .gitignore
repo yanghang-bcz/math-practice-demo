@@ -1,0 +1,5 @@
+# Generated reliability acceptance artifacts (may contain local traces)
+/verification/
+.env
+.env.*
+!.env.example

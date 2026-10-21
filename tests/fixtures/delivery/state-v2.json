@@ -1,0 +1,86 @@
+{
+  "version": 2,
+  "profile": {
+    "diagnosed": false,
+    "diagnosisCompletedAt": null,
+    "placementSource": "default",
+    "abilityByModule": {
+      "limit": 6,
+      "derivative": 7.3,
+      "integral": 6
+    },
+    "displayLevelByModule": {
+      "limit": 6,
+      "derivative": 6,
+      "integral": 6
+    },
+    "confidenceByModule": {
+      "limit": 0.15,
+      "derivative": 0.15,
+      "integral": 0.15
+    },
+    "effectiveAttemptsByModule": {
+      "limit": 0,
+      "derivative": 0,
+      "integral": 0
+    }
+  },
+  "settings": {
+    "difficultyMode": "adaptive",
+    "manualLevels": {
+      "limit": 6,
+      "derivative": 6,
+      "integral": 6
+    },
+    "trainingMode": "balanced",
+    "dailyCount": 10
+  },
+  "difficultyModel": {
+    "version": "v0-provisional",
+    "calibrated": false,
+    "calibrationPoints": [],
+    "note": "Soft-anchor provisional scale. Waiting for real anchor bank."
+  },
+  "stats": {
+    "attempts": 0,
+    "correct": 0,
+    "byModule": {
+      "limit": {
+        "attempts": 0,
+        "correct": 0
+      },
+      "derivative": {
+        "attempts": 0,
+        "correct": 0
+      },
+      "integral": {
+        "attempts": 0,
+        "correct": 0
+      }
+    },
+    "byTopic": {}
+  },
+  "reviews": [
+    {
+      "id": "synthetic-review",
+      "module": "integral",
+      "wrongCount": 1,
+      "nextReviewAt": "2026-10-22"
+    }
+  ],
+  "history": [
+    {
+      "id": "synthetic-attempt",
+      "module": "limit",
+      "correct": true,
+      "userAnswer": "1"
+    }
+  ],
+  "checkins": [
+    "2026-10-20"
+  ],
+  "activeSession": null,
+  "dailyMeta": {
+    "lastCompletedDate": null
+  }
+}

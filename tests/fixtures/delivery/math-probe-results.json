@@ -1,0 +1,302 @@
+{
+  "fixture_source": "Manually constructed offline probes; reviewer result is mocked as all true to isolate deterministic behavior.",
+  "version": "quality-v2",
+  "gate_policy": "strict-tier-b",
+  "rows": [
+    {
+      "name": "control",
+      "question": {
+        "expression": "y=\\ln(1+x^2)",
+        "answer": "\\frac{2x}{1+x^2}"
+      },
+      "deterministic_verdict": "equivalent",
+      "profile": {
+        "tier": "A",
+        "readable": true,
+        "verdict": "equivalent",
+        "reason": "derivative_ok"
+      },
+      "issues": [],
+      "gate": {
+        "ok": true,
+        "state": "VERIFIED",
+        "tier": "A",
+        "verdict": "equivalent",
+        "needsSecondaryReview": false
+      }
+    },
+    {
+      "name": "latex_definition",
+      "question": {
+        "expression": "f\\left(x\\right)=x^2",
+        "answer": "2x"
+      },
+      "deterministic_verdict": "uncertain",
+      "profile": {
+        "tier": "C",
+        "readable": false,
+        "verdict": "uncertain",
+        "reason": "implicit_relation"
+      },
+      "issues": [],
+      "gate": {
+        "ok": false,
+        "state": "UNCERTAIN",
+        "code": "UNVERIFIED_SHAPE",
+        "tier": "C",
+        "verdict": "uncertain",
+        "reason": "implicit_relation",
+        "unverified": true
+      }
+    },
+    {
+      "name": "domain_only_positive",
+      "question": {
+        "expression": "y=\\ln(x-3)",
+        "answer": "\\frac{1}{x-3}"
+      },
+      "deterministic_verdict": "uncertain",
+      "profile": {
+        "tier": "C",
+        "readable": false,
+        "verdict": "uncertain",
+        "reason": "derivative_body_unparseable"
+      },
+      "issues": [],
+      "gate": {
+        "ok": false,
+        "state": "UNCERTAIN",
+        "code": "UNVERIFIED_SHAPE",
+        "tier": "C",
+        "verdict": "uncertain",
+        "reason": "derivative_body_unparseable",
+        "unverified": true
+      }
+    },
+    {
+      "name": "sparse_valid_domain",
+      "question": {
+        "expression": "y=\\arcsin(2x)",
+        "answer": "\\frac{2}{\\sqrt{1-4x^2}}"
+      },
+      "deterministic_verdict": "uncertain",
+      "profile": {
+        "tier": "B",
+        "readable": true,
+        "verdict": "uncertain",
+        "reason": "derivative_ok"
+      },
+      "issues": [],
+      "gate": {
+        "ok": false,
+        "state": "UNCERTAIN",
+        "code": "UNVERIFIED_ANSWER",
+        "tier": "B",
+        "verdict": "uncertain",
+        "reason": "derivative_ok",
+        "unverified": true
+      }
+    },
+    {
+      "name": "base_log",
+      "question": {
+        "expression": "y=\\log_2 x",
+        "answer": "\\frac{1}{x\\ln 2}"
+      },
+      "deterministic_verdict": "not_equivalent",
+      "profile": {
+        "tier": "A",
+        "readable": true,
+        "verdict": "not_equivalent",
+        "reason": "derivative_ok"
+      },
+      "issues": [
+        "ANSWER_FAILS_VERIFICATION"
+      ],
+      "gate": {
+        "ok": false,
+        "state": "REJECTED",
+        "code": "ANSWER_FAILS_VERIFICATION",
+        "issues": [
+          "ANSWER_FAILS_VERIFICATION"
+        ]
+      }
+    },
+    {
+      "name": "high_power_10",
+      "question": {
+        "expression": "y=\\sin^{10}x",
+        "answer": "10\\sin^9x\\cos x"
+      },
+      "deterministic_verdict": "uncertain",
+      "profile": {
+        "tier": "C",
+        "readable": false,
+        "verdict": "uncertain",
+        "reason": "derivative_body_unparseable"
+      },
+      "issues": [],
+      "gate": {
+        "ok": false,
+        "state": "UNCERTAIN",
+        "code": "UNVERIFIED_SHAPE",
+        "tier": "C",
+        "verdict": "uncertain",
+        "reason": "derivative_body_unparseable",
+        "unverified": true
+      }
+    },
+    {
+      "name": "upright_e",
+      "question": {
+        "expression": "y=\\mathrm{e}^x",
+        "answer": "\\mathrm{e}^x"
+      },
+      "deterministic_verdict": "uncertain",
+      "profile": {
+        "tier": "C",
+        "readable": false,
+        "verdict": "uncertain",
+        "reason": "derivative_body_unparseable"
+      },
+      "issues": [],
+      "gate": {
+        "ok": false,
+        "state": "UNCERTAIN",
+        "code": "UNVERIFIED_SHAPE",
+        "tier": "C",
+        "verdict": "uncertain",
+        "reason": "derivative_body_unparseable",
+        "unverified": true
+      }
+    },
+    {
+      "name": "point_value_correct",
+      "question": {
+        "instruction": "求函数在 x=1 处的导数",
+        "expression": "y=x^2",
+        "answer": "2"
+      },
+      "deterministic_verdict": "not_equivalent",
+      "profile": {
+        "tier": "A",
+        "readable": true,
+        "verdict": "not_equivalent",
+        "reason": "derivative_ok"
+      },
+      "issues": [
+        "ANSWER_FAILS_VERIFICATION"
+      ],
+      "gate": {
+        "ok": false,
+        "state": "REJECTED",
+        "code": "ANSWER_FAILS_VERIFICATION",
+        "issues": [
+          "ANSWER_FAILS_VERIFICATION"
+        ]
+      }
+    },
+    {
+      "name": "point_value_wrong_answer_type",
+      "question": {
+        "instruction": "求函数在 x=1 处的导数",
+        "expression": "y=x^2",
+        "answer": "2x"
+      },
+      "deterministic_verdict": "equivalent",
+      "profile": {
+        "tier": "A",
+        "readable": true,
+        "verdict": "equivalent",
+        "reason": "derivative_ok"
+      },
+      "issues": [],
+      "gate": {
+        "ok": true,
+        "state": "VERIFIED",
+        "tier": "A",
+        "verdict": "equivalent",
+        "needsSecondaryReview": false
+      }
+    },
+    {
+      "name": "integral_upright_d",
+      "question": {
+        "module": "integral",
+        "instruction": "计算不定积分",
+        "expression": "\\int x\\,\\mathrm{d}x",
+        "answer": "x^2/2+C"
+      },
+      "deterministic_verdict": "uncertain",
+      "profile": {
+        "tier": "C",
+        "readable": false,
+        "verdict": "uncertain",
+        "reason": "integrand_unparseable"
+      },
+      "issues": [],
+      "gate": {
+        "ok": false,
+        "state": "UNCERTAIN",
+        "code": "UNVERIFIED_SHAPE",
+        "tier": "C",
+        "verdict": "uncertain",
+        "reason": "integrand_unparseable",
+        "unverified": true
+      }
+    },
+    {
+      "name": "solution_intermediate_limit",
+      "question": {
+        "module": "limit",
+        "instruction": "计算极限",
+        "expression": "\\lim_{x\\to0}(\\frac{\\sin x}{x}+x)",
+        "answer": "1",
+        "solution": "由重要极限，第一项极限为 \\(1\\)，第二项极限为 \\(0\\)，因此原极限为 \\(1\\)。"
+      },
+      "deterministic_verdict": "equivalent",
+      "profile": {
+        "tier": "A",
+        "readable": true,
+        "verdict": "equivalent",
+        "reason": "limit_ok"
+      },
+      "issues": [
+        "SOLUTION_MISMATCH"
+      ],
+      "gate": {
+        "ok": false,
+        "state": "REJECTED",
+        "code": "SOLUTION_MISMATCH",
+        "issues": [
+          "SOLUTION_MISMATCH"
+        ]
+      }
+    },
+    {
+      "name": "wrong_answer_control",
+      "question": {
+        "expression": "y=\\ln(1+x^2)",
+        "answer": "\\frac{x}{1+x^2}"
+      },
+      "deterministic_verdict": "not_equivalent",
+      "profile": {
+        "tier": "A",
+        "readable": true,
+        "verdict": "not_equivalent",
+        "reason": "derivative_ok"
+      },
+      "issues": [
+        "ANSWER_FAILS_VERIFICATION"
+      ],
+      "gate": {
+        "ok": false,
+        "state": "REJECTED",
+        "code": "ANSWER_FAILS_VERIFICATION",
+        "issues": [
+          "ANSWER_FAILS_VERIFICATION"
+        ]
+      }
+    }
+  ]
+}

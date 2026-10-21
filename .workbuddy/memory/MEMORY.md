@@ -1,198 +1,204 @@
 # CalcDaily 项目长期备忘
 
-> 详细过程记录在仓库根的报告里，这里只留**做决定时要用的东西**：
-> `RELIABILITY-TASK4.md`（判题可靠性）· `RELIABILITY-TASK5.md`（v1.1 收尾）·
-> `ONLINE-VALIDATION-REPORT.md`（200 题线上评测 + §14 Task 5K）。
-> 按天的工作日志在 `.workbuddy/memory/YYYY-MM-DD.md`。
+> 只留**做决定时要用的东西**。过程细节在仓库根的报告里：
+> `RELIABILITY-TASK4.md`（判题）· `RELIABILITY-TASK5.md`（v1.1）·
+> `ONLINE-VALIDATION-REPORT.md`（线上评测 + §14 Task 5K + §15 v1.1 验收）。
+> 按天日志在 `.workbuddy/memory/YYYY-MM-DD.md`。
 
 ## 项目定位
-考研高数自适应练习 Web 应用（静态前端 + 云函数后端）。目标是一条
-「AI 出题 + 确定性验证」的可信流水线，而不是靠提示词祈祷模型别算错。
+考研高数自适应练习 Web 应用（静态前端 + 云函数后端）。核心是
+「AI 出题 + 确定性验证」的可信流水线，不靠提示词祈祷模型别算错。
 
-## 架构事实（别猜，按这个来）
-- 静态站点从仓库根目录直接服务。前端 7 个文件：
-  `index.html`、`cloudbase-client.js`、`storage.js`、`auth.js`、`math-quality.js`、
-  `fallback-bank.js`、`app.js`（另有 `vendor/mathjax/`，一般不动）。
-- **三处副本必须同步**，有测试盯着：
+## 架构
+- 静态站点从仓库根直接服务，前端 7 个文件：`index.html`、`cloudbase-client.js`、
+  `storage.js`、`auth.js`、`math-quality.js`、`fallback-bank.js`、`app.js`
+  （另有 `vendor/mathjax/`，一般不动）。
+- 加载顺序（`wiring.cjs` 钉着，别乱改）：
+  `cloudbase-client → storage → auth → math-quality → fallback-bank → app`。
+  `fallback-bank.js` 必须在 `app.js` 前，否则 `typeof FallbackBank` 取不到。
+- **三处副本必须同步**（有测试断言）：
   - `math-quality.js` ↔ `cloudbase/deepseek/math-quality.js` → `npm run sync:engine`
-    （`reliability.cjs` 断言两者逐字节一致）
-  - 后端业务段（哨兵 `const PIPELINE = {` 起到文件尾）：
+  - 后端业务段（哨兵 `const PIPELINE = {` 到文件尾）：
     `cloudbase/deepseek/index.js`（**源，线上生效**）→ `api/deepseek.js` → `npm run sync:backend`
-  - 改完一律 `npm run check:sync`（两条断言：业务段 1534+ 行一致、引擎副本一致）
-- 环境变量/密钥不在仓库里，别去找。本机**没有任何部署凭据或 CLI**
-  （无 `tcb`/`cloudbase`/`vercel`，无 `~/.tcb`、`~/.config/cloudbase`）——**agent 无法部署**。
+  - 改完一律 `npm run check:sync`。
+- 密钥/环境变量不在仓库里。本机**无任何部署凭据或 CLI**（无 `tcb`/`cloudbase`/`vercel`）
+  —— **agent 无法部署**，只能改代码 + push，部署要用户做。
+- 🔴 **`git push` 假失败陷阱**：会打印
+  `fatal: could not read Username for 'https://github.com': terminal prompts disabled`
+  并非零退出，**但推送其实成功了**。别凭这句 fatal 重推。
+  判据只看 sha：`git ls-remote origin main` vs `git rev-parse main`。
+  （`~/.ssh`、`~/.netrc`、`~/.git-credentials` 均不存在，钥匙串也查不到 → 根因未定论。）
+- `git add` 报 `File exists` 撞 `.git/index.lock` 时，先看锁的 mtime：
+  几天前的 0 字节残留直接 `rm -f`；刚产生的要先怀疑真有 git 在跑。
+
+## 仓库基线
+- HEAD = `origin/main` = **`ab0e0a0`**（2026-10-07，Task 5K 修复 + 验收报告 §15）。
+- ⚠️ 此前 `origin/main` 长期停在 `f25e76b`（= Task 5K **之前**）。
+  **从旧 commit 部署会静默把线上覆盖回有 P0 洞的版本**，不报错。
 
 ## 部署拓扑
-- ✅ **唯一生产域名**：`https://calcdaily-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/`
-  —— v1.1（`7f35c89`），8/8 文件逐字节一致。文档（README ×2、PRD ×2）已统一到它。
-- ❌ `calcdaily-v4-…` / `calcdaily-v6-…` **已被删除**。`README` 里旧链接此前全指向 v4。
-- 🔴 **默认域名会给访客弹腾讯云「风险提醒」拦截页**（`document.title = "风险提醒"`），
-  必须点「确定访问」才进应用。**`curl` 完全看不到这一层**。
-  要给外部使用 → 必须绑自定义域名。这是托管就绪度最后一块。
+- **生产域名两个**：
+  - `https://calcdaily.cn/` ← 自定义域名（2026-10 绑定，证书 10-13 签发），
+    **无腾讯云「风险提醒」拦截页**，浏览器直开即进应用；7 文件与本地逐字节一致，
+    AI 状态「已连接」；**云开发安全域名白名单已含该域**（判定手法见 `2026-10-16.md`）。
+    缺口：`www.calcdaily.cn` 无 DNS；`http://` 不强制跳 HTTPS。
+  - `https://calcdaily-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/` ← 默认域名，
+    **会弹「风险提醒」拦截页**（`document.title = "风险提醒"`），curl 看不到这一层。
+  - ❌ `calcdaily-v4-…` / `calcdaily-v6-…` 已删除（README 旧链接曾指向 v4）。
 - **后端**：云函数 `deepseek`，env `calcdaily-d5g2titwue91551fb`（ap-shanghai），
   `https://calcdaily-d5g2titwue91551fb-1482769901.ap-shanghai.app.tcloudbase.com/api/deepseek`。
   部署 = 覆盖该函数的 `index.js` + `math-quality.js`。
-- **后端地址硬编码在前端**：`cloudbase-client.js:21`、`app.js:1502`。
-- **上线后版本自查**（顺序很重要）：
-  - 后端最可靠的判别项：`GET <后端>/api/deepseek?health=1` → 看 `math_engine_version`
-    （`79adbeb` 及更早没有这个字段）与 `gate_policy`（Task 5K 起才有，见下）。
-    ⚠️ **`protocol_version` 不能当判别项** —— 新旧版代码里都有（犯过这个错）。
-  - 前端：**先看 HTTP 状态码，再比 `shasum -a 256`**。只比哈希不比状态码会得出错误结论
-    （CloudBase 的 404 页内容每次都略有不同，哈希会乱跳）。
-  - ⚠️ 本机有 `HTTP_PROXY`，所有 curl 都要加 `--noproxy '*'`。
-- **判断「站还在不在」有个干净的探针**（两个错误码含义完全不同）：
-  - `INVALID_HOST`（JSON）= **站点不存在**（已删）
-  - `NoSuchKey`（COS，HTML 带 `<li>Key: …`）= **站点存在但内容路径拼错了**
-  （真实案例：托管「部署路径」配成 `/calcdaily`，导致每个 key 变成
-  `calcdaily//index.html` 双斜杠 → 全 404；改成 `/` 后恢复。）
-- **只发前端 = 新客户端 + 旧后端**。v1.1 起前端对每个响应做版本校验，
-  旧后端响应缺 `versions` → 全部回落备用题（不崩，但没有 AI 出题）。
-  所以 v1.1 顺序是**后端先、前端后**，回滚相反。细节见 `RELIABILITY-TASK5.md` §5。
-
-## 脚本加载顺序（有测试盯着，别乱改）
-```
-cloudbase-client.js → storage.js → auth.js → math-quality.js → fallback-bank.js → app.js
-```
-`fallback-bank.js` 必须在 `app.js` **之前**，否则 `typeof FallbackBank` 取不到。
+  后端地址**硬编码在前端**：`cloudbase-client.js:21`、`app.js:1502`。
+- **上线后版本自查**：
+  - 后端：`GET <后端>?health=1`，看 `math_engine_version`（老版没有）+ `gate_policy`（Task 5K 起）。
+    ⚠️ `protocol_version` **不是**判别项（新旧都有）。
+  - 前端：**先看 HTTP 状态码再看 `shasum -a 256`**（只看哈希会被 404 页的抖动带偏）。
+  - curl 一律 `--noproxy '*'`。
+- **判断「站还在不在」的干净探针**：`INVALID_HOST`（JSON）= 站点不存在；
+  `NoSuchKey`（COS，HTML 带 `<li>Key: …`）= 站点在但内容路径拼错。
+- **只发前端 = 新客户端 + 旧后端**：旧后端响应缺 `versions` → 全回落备用题
+  （不崩，但没有 AI 出题）。所以升级顺序**后端先、前端后**，回滚相反。
+- 🔴 **本机系统代理**（`scutil --proxy`：HTTP/HTTPS/SOCKS 全 `127.0.0.1:7897`）。
+  **浏览器/GUI 走它，curl/Playwright 不走** —— 「我测是好的、用户说坏了」多半出在这。
+  经代理访问后端 health 要 **2~11s**（后端自报仅几十 ms；直连 0.15s），
+  会打爆前端 `HEALTH_TIMEOUT_MS = 8000` → 状态栏显示「AI 服务未连接」。
+  该 `apiHealthy` **只驱动状态栏文案**，不 gate 任何请求（出题 60s / 判题 22s），
+  且超时后**无自动重试**。所以那句话 ≠ AI 挂了。
 
 ## 核心设计决策（已确立，别回退）
-1. **可信来源只有两处**：`MathQuality.approved(q)`（AI 题）与 Verified Fallback Bank。
-   `trustedQuestion()` 是唯一判定入口。
-2. **失败必须带原因**。任何 `{ok:false}`/`{trusted:false}` 都要同时给 `reason` ——
+1. **可信来源只有两处**：`MathQuality.approved(q)`（AI 题）与 Verified Fallback Bank，
+   `trustedQuestion()` 是唯一入口。
+2. **失败必须带原因**：任何 `{ok:false}`/`{trusted:false}` 都要同时给 `reason`。
    踩过坑：把「网络连不上」和「题目有问题」压成一个 `trusted:false`，
-   界面把网络故障说成「这道题已作废」，还丢了用户答案。处置集中在 `judgeOutcome()`。
-3. **错误状态分类**：`question_untrusted` → 作废该题；
-   `judge_unavailable` / `judge_uncertain` → 保留题目与答案让用户重试；未知形态 → 一律重试。
-4. **引擎宁可 `uncertain`，也不产生错误的拒绝**（解析失败/域外采样/不收敛 → uncertain）。
-5. **判题先本地后远端**：`judgeDeterministic` 能定的绝不打 AI。浏览器里跑同一份引擎。
-6. **判题权限单向**：模型只能把答案判「错」，不能判「对」。
-   规则在 `MathQuality.trustModelVerdict`（只采信 `not_equivalent` + 置信度 ≥ 0.9，
-   `equivalent` 一律不采信）。前后端共用同一条，别在别处另写一份。
-   于是 **`correct:true` 只有一条来路：确定性引擎判 `equivalent`** —— 这是结构性保证。
-7. **生成闸门与判题闸门口径不同，这是有意的**：
-   - 生成端 `gateApproved()` / `gateDecision()`：**UNCERTAIN 不放行**，退备用题；
-   - 判题端 `approved()`：**UNCERTAIN 放行** —— 用户正在做的题不能因为「机器验不了」作废。
+   界面把网络故障说成「这道题已作废」还丢了答案。处置集中在 `judgeOutcome()`。
+3. **错误分类**：`question_untrusted` → 作废该题；
+   `judge_unavailable` / `judge_uncertain` / 未知形态 → 保留题目与答案让用户重试。
+4. 引擎宁可 `uncertain`，也不产生错误的拒绝。
+5. **判题先本地后远端**：`judgeDeterministic` 能定的绝不打 AI。
+6. **判题权限单向**：模型只能判「错」。规则在 `MathQuality.trustModelVerdict`
+   （只采信 `not_equivalent` + `confidence` 是 number 且 ≥ 0.9；`equivalent` 不采信）。
+   于是 **`correct:true` 只有一条来路：确定性引擎判 `equivalent`**。
+7. **两侧闸门口径不同是有意的**：生成端 `gateApproved()` **UNCERTAIN 不放行**（退备用题）；
+   判题端 `approved()` **UNCERTAIN 放行**（用户正在做的题不因「机器验不了」作废）。
 
-## Task 5K（2026-09-21）：生成闸门不再放行未验证的答案 ← 最近的改动
-- **病根**：`gateDecision()` 此前只拦 Tier C，`tier !== C` 一律 `VERIFIED`。
-  而 Tier B = 「结构读得懂、这一次数值没给结论」= **同样没验证过**。
-- **两个修复，各自都能拦住那次泄漏**（有意留的冗余）：
-  1. **`gateStateFromProfile(profile)`**：三态的唯一映射，
+## Task 5K（2026-09-21）：生成闸门不再放行未验证答案 ← 最近的功能改动
+- **病根**：`gateDecision()` 只拦 Tier C，`tier !== C` 一律 `VERIFIED`；
+  而 Tier B（结构读得懂、这一次数值没结论）= **同样没验证过**。
+- **两个修复（有意冗余，各自都能拦住那次泄漏）**：
+  1. `gateStateFromProfile(profile)` —— 三态唯一映射：
      `equivalent→VERIFIED` / `not_equivalent→REJECTED` / 其余（含 Tier B）`→UNCERTAIN`。
-     `gateDecision()` 与后端 `reviewQuestion()` 都改调它（原先后端自己抄了一份三元表达式）。
-  2. **`toInfix` 把裸 `[ ]` 归一成 `( )`**：白名单原本只有 `+-*/^(),`，
-     所以 `\left[...\right]` 整条 unparseable → Tier B。幂指函数答案几乎都长这样。
-     ⚠️ 这一步**必须在剥离 `\[ \]`（display-math 定界符）之后**，否则清错。
-  数值求导的接线本来就在（`verifyDerivative` 一直是 `verifyAnswerAgainstQuestion` 的一环），
-  **卡住的只是 parser**。
-- **原因码拆开**：Tier C → `UNVERIFIED_SHAPE`，Tier B → 新增 **`UNVERIFIED_ANSWER`**
-  （两类修法不同：改题型约束 vs 换数字）。
-- **部署指纹 `gate_policy = 'strict-tier-b'`**：改 VERSION 会弄红 `pipeline-v3.cjs` 的协议夹具，
-  所以照 Task #4 用 `judge_layer` 的先例**加新字段**。
-  出现在 health 与 generate 响应**顶层**（不进 `versions`，那是契约对象）。
-  查法：`?health=1` 找 `"gate_policy"`。
-  **不要**用「响应里出现了 `UNVERIFIED_ANSWER`」判断版本 —— 要抽到 Tier B 题才碰得到。
-- ⚠️ **历史 200 题里 Tier B 是 0 条**（A=105 / B=0 / C=95）。
-  所以那一刀在历史数据上的降级数是 **0**；抓到的 1 道（105→104）
-  **完全是 parser 修好后**给的 `not_equivalent`。Tier B 保护只能靠结构论证 + 单测证明。
-- **定向复测**（部署后跑；默认考点池里没有幂指函数，必须显式追加）：
-  ```bash
-  npm run smoke -- --label task5k-deriv \
-    --only derivative-L8,derivative-L10,derivative-L12 \
-    --extra-topics 'derivative:幂指函数求导,对数求导法'
-  ```
-  一轮 12 格（其中 5 格幂指函数），跑 3 轮 = 36 道。默认矩阵与 `HEAD` 逐题一致，历史可比。
-- 完整记录：`ONLINE-VALIDATION-REPORT.md` §14。
+     `gateDecision()` 与后端 `reviewQuestion()` 都调它（原先后端自己抄了三元式）。
+  2. `toInfix` 把裸 `[ ]` 归一成 `( )`（白名单原本只有 `+-*/^(),`，
+     于是 `\left[...\right]` 整条 unparseable → Tier B；幂指函数答案几乎都长这样）。
+     ⚠️ 必须在剥离 `\[ \]` 定界符**之后**做。
+- **原因码**：Tier C → `UNVERIFIED_SHAPE`；Tier B → **`UNVERIFIED_ANSWER`**。
+  关系：`UNVERIFIED_ANSWER` ⟺ readable 且 verdict ∉ {equivalent, not_equivalent} ⟺ Tier B。
+- **部署指纹 `gate_policy = 'strict-tier-b'`**：照 `judge_layer` 先例加新字段
+  （改 VERSION 会弄红 `pipeline-v3.cjs` 夹具），出现在 health 与 generate 响应**顶层**。
+- ⚠️ 历史 200 题里 Tier B = 0 条，所以这刀在老数据上降级数 **0**，只能靠结构论证 + 单测。
+- **线上判别手法**：`judge` 动作处理前先跑 `Quality.approved(q)`，返回
+  `question_untrusted` 即证明部署端引擎判 REJECTED（UNCERTAIN 是放行的）。
+- 定向复测：`npm run smoke -- --label task5k-deriv --only derivative-L8,derivative-L10,derivative-L12 --extra-topics 'derivative:幂指函数求导,对数求导法'`
+  （默认考点池没有幂指函数，必须显式追加；一轮 12 格）。
+- 验收结论（§15）：36 格 → 放行 15 / fallback 21；三态 VERIFIED 15；
+  独立复核 11 函数 44 采样点全对；线上 Tier B 放行为 VERIFIED **0 次**；
+  三硬指标（wrong_approved / canonical_drift / judge_inconsistency）全 0；`npm test` 249/249。
+
+## AI 连接稳定性（2026-10-16 实测，完整报告见 `NETWORK-STABILITY-REPORT.md`）
+- **连接本身没问题**：health 直连 60/60 + 30/30（p50 100ms，后端自报 19~21ms）；
+  真实浏览器走系统代理 **10/10（p50 59ms）**；generate 失败 **0/36** 是网络原因。
+  「AI 连接不稳定」这个判断**不成立**。
+- 🔴 **curl 走代理的数字不代表浏览器**：curl 仅 6~18/30、`SSL_ERROR_SYSCALL`、还出现过
+  5 次挂起 600~1040s（`--max-time` 没兜住，且把本机 DNS 拖挂 → 后续全 `Could not resolve host`）。
+  差别在**连接复用**：浏览器保持长隧道，curl 每次新开。**探针必须同时给
+  `--connect-timeout`，两条路径的数字要一起看。**
+- **真正原因是生成闸门拒稿，且强依赖考点**：50 格矩阵 **25/50**；
+  derivative **2/18=11%** / limit 7/14 / integral 16/18。
+  **0% 考点**（引擎结构上验不了）：`隐函数求导`、`参数方程求导`、`分段点处的可导性`、
+  `复合函数求导`、`定积分定义求数列极限`。
+- 🔴 **口径陷阱**：矩阵**钉死考点**；真实产品 `chooseWeakTopic()` 多数返回 **null**。
+  导数模块同一批请求：钉考点 **5/18=28%**，`topic:null` **18/18=100%**。
+  **钉考点测出的成功率不能当用户体感**（探针 `--loose-topic` 就是为这个加的）。
+  连锁缺陷：在「隐函数求导」做错的学生会被反复喂这一考点 → 永远备用题。
+- **判题「等价形式」覆盖率其实很好**：16 用例（每条配原答案对照）→ 对照 14/14，
+  改写认对 **13/14**。唯一缺口是**前置常数** `C+\arctan x`：
+  `math-quality.js:1073 stripPlusC()` 只剥尾部 `+C`。这条**与网络无关**（本地引擎先跑，
+  uncertain 才打网络），只能靠扩引擎覆盖，不能放松模型权限。
+- **放大器**：闸门拒稿返回 **HTTP 500**（`index.js:1290` 设了 `error.code` 却没设
+  `statusCode`），而 `app.js:2034 apiRetryable()` 认为 5xx 可重试 →
+  一次拒稿最多烧 4 次模型调用、用户等 ~12s（**代码推断**，未直接测）。
+- **副作用**：`topic:null` 下 18 道里 `((x)/(x+1))^x` 出现 8 次 —— 通过率上去了，多样性掉了。
+- 探针：`npm run net:stability -- --mode health|generate|judge|equiv|session
+  --via direct|proxy --n N [--modules derivative] [--loose-topic]`。
 
 ## 数学验证引擎的坑（踩过的，别再犯）
-- **`\frac` 的分子/分母可以嵌套花括号**，`[^{}]*` 抓不住，要花括号平衡匹配 + 递归。
-  裸速写 `\frac12` = 1/2，每个参数只占**一个** token（读成数字串会把 `\frac12` 变成 `12/…`）。
-- **`\cos^2 x` 是 `(cos x)^2`**，不是 `cos(x^2)`，也不是把 token `cos` 平方。
-- **`\sqrt{...}` 必须保留括号**，丢掉会变成 `sqrt(1)+x^2` 静默算错。
-- **`|A|` → `abs(A)`**：`|` 在 tokenizer 里是非法字符，`\ln|x|+C` 这类最常见的积分答案
-  原本整条解析不了。规则保守：奇数个竖线 / 嵌套 / 空内容一律**不动**（保持 uncertain）。
-- **`normalize()` 的括号剥离必须看上下文**：那条把 `(a)/(b)` 清成 `a/b` 的规则曾不看前一个字符，
-  于是 `2(1)/(6)` 被清成 `21/6`（捏造的数），`1(2)/(3)` 与 `12/3` 被判等价 —— 错答放行。
-- **数值采样不能取极小步长**。`e^x-1-x-x^2/2` 在 x=1e-6 因双精度相减抵消算出 -37.8。
-  步长固定 1e-2~1e-4；极限用粗/细两套步长交叉核对，不一致就不下结论。
-- **精确比较要覆盖指数写法**：`0` vs `1e-15`、`0` vs `1e-400` 必须判不等价。
-- **`confidence` 必须 `typeof === 'number'`**，不能用 `Number()` 强转，否则 `'0.99'` 能混过闸门。
-- **定位「引擎判不了」时，先分清是 parser 读不出来，还是根本没走 parser。**
-  历史误判：以为「11 个形态都解析不出」，实测 10/11 的 `tryParse` 本就 OK，
-  真正的病根是判题只调了 `compare()`（标量专用），表达式形态全返回 uncertain。
-- **不定积分加任意常数是等价的**（`F(x)+C+1000 ≡ F(x)+C`）。
-  拿「答案 ±常数」当错答会得到假阳性，设计探针时必须避开。
+- `\frac` 分子分母可嵌套花括号，要平衡匹配 + 递归；裸 `\frac12` = 1/2，
+  每个参数只占**一个** token（读成数字串会变成 `12/…`）。
+- `\cos^2 x` = `(cos x)^2`，不是 `cos(x^2)`，也不是把 token `cos` 平方。
+- `\sqrt{...}` 必须保留括号（丢了会变成 `sqrt(1)+x^2` 静默算错）。
+- `|A|` → `abs(A)`（`|` 在 tokenizer 里非法，`\ln|x|+C` 这类原本整条解析不了）。
+  规则保守：奇数个竖线 / 嵌套 / 空内容一律不动。
+- `normalize()` 的括号剥离必须看上下文：曾不看前一个字符，把 `2(1)/(6)` 清成 `21/6`
+  （捏造的数），`1(2)/(3)` 与 `12/3` 判等价 → 错答放行。
+- 数值采样不能取极小步长（`e^x-1-x-x²/2` 在 x=1e-6 因抵消算出 -37.8）。
+  步长固定 1e-2~1e-4；极限用粗/细两套步长交叉核对，不一致不下结论。
+- 精确比较要覆盖指数写法：`0` vs `1e-15`、`0` vs `1e-400` 必须判不等价。
+- 「引擎判不了」要先分清是 **parser 读不出**，还是**根本没走 parser**。
+  历史误判：以为 11 个形态都解析不出，实测 10/11 的 `tryParse` 本就 OK，
+  真病根是判题只调了 `compare()`（标量专用）。
+- **不定积分加任意常数等价**（`F(x)+C+1000 ≡ F(x)+C`），拿「±常数」当错答是假阳性。
 - **`compare()` 不许改**：它做精确有理数比较（`1/6` vs `2/12` 靠它），
-  把表达式判定塞进这一层会破坏那批语义 —— `tests/math-engine.cjs` 有守卫钉着。
+  `tests/math-engine.cjs` 有守卫钉着。
 
-## Task #4（判题）：一句话回顾
-`judgeDeterministic(question, candidate)` → `{verdict, layer}`，
-`layer ∈ scalar | structural | none`。`verifyAgainstQuestion` 只是它的薄封装。
-**bug 的教训**：`Wrong approved 0/41` 是**探测器覆盖率**的结论，
-不是「41 道答案都对」—— 实测 41 道已放行题里 **4 道参考答案本身是错的**。
-详见 `RELIABILITY-TASK4.md`。
+## Task #4（判题）：一句话
+`judgeDeterministic(question, candidate)` → `{verdict, layer}`，`layer ∈ scalar|structural|none`。
+教训：`Wrong approved 0/41` 是**探测器覆盖率**的结论，实测 41 道里 **4 道参考答案本身是错的**。
 
-## v1.1 的不变量（Task 5A–5J，细节见 `RELIABILITY-TASK5.md`）
-- **题目身份是冻结的**：`MathQuality.freezeCanonical(q)` 写 FNV-1a 指纹，只覆盖身份
-  （7 个 canonical 字段 + `question_id` + 来源 + 版本），**不含难度** ——
-  重新标定不算换题。改到 canonical 字段 → `canonicalIntegrity().ok === false` →
-  `issues()` 只报 `CANONICAL_MUTATED` 且**不再验答案**。**备用题也必须冻结**
-  （它靠 bankId 命中，最容易被绕）。
+## v1.1 不变量（细节见 `RELIABILITY-TASK5.md`）
+- **题目身份冻结**：`freezeCanonical(q)` 写 FNV-1a 指纹，只覆盖 7 个 canonical 字段 +
+  `question_id` + 来源 + 版本，**不含难度**（重标定不算换题）。canonical 被改 →
+  `issues()` 只报 `CANONICAL_MUTATED` 且不再验答案。**备用题也必须冻结**。
 - **三个 id 贯穿每次请求**：`request_id` / `session_id` / `question_sequence`，
-  服务端 `withResponseMeta()` 原样回显。判「重试是否同一请求」「晚到的响应属于谁」都靠它。
-- **版本校验两层**：health 比一次五版本 + **每次响应再校验一次**。
-  `knownProtocolMismatch()` 只在「已确认不匹配」时走短路径 ——
-  没测过/连不上都不拦，否则冷启动头几秒只能拿备用题。
-- `window.CalcDailyDiag` = 200 条环形缓冲 + 失败分类表，字段一律显式给全（缺的写 null）；
-  `window.CalcDailyCloud.getSyncState()` 供验收脚本读同步状态。
-- 加分字段（新响应字段）是判断「线上跑的是哪一版」最硬的信号，**比改版本号常量可靠**
-  （改常量会连带弄红 `pipeline-v3.cjs` 的协议夹具断言）。
-  Task #3 用 `protocol_version` + `verification.version`，Task #4 用 `judge_layer`，
-  Task 5K 用 `gate_policy`。
+  服务端 `withResponseMeta()` 原样回显。
+- **版本校验两层**：health 比五版本 + 每次响应再校验。`knownProtocolMismatch()`
+  只在「已确认不匹配」时走短路径（没测过/连不上都不拦，否则冷启动只拿备用题）。
+- `window.CalcDailyDiag` = 200 条环形缓冲 + 失败分类表（字段显式给全）；
+  `window.CalcDailyCloud.getSyncState()` 读同步状态。
+- **判断「线上跑哪一版」看加分字段**，比改版本号常量可靠：
+  Task #3 `protocol_version` + `verification.version`，Task #4 `judge_layer`，Task 5K `gate_policy`。
 
 ## 测试
-- `npm test` 跑 `tests/*.cjs`（Node 22 下 `node --test tests/` 不认目录）。
-- 分类：`math-engine`（引擎 + 闸门）、`fallback-bank` / `fallback-audit`（题库自检）、
-  `wiring`（接线契约）、`reliability`（端到端回归 + 真实事故复现）、
-  `pipeline-v3`（流水线契约）、`smoke-matrix`（50 题测试台守卫）、
-  `canonical-freeze` / `wrong-canonical` / `protocol-health` / `prefetch-race` / `client-retry`。
-- `wiring.cjs` 专门防「改完模块忘了改加载顺序 / 又塞回内联副本」这类只在运行时暴露的问题。
-- `smoke-matrix.cjs` 同时钉住评测矩阵的**可比性**：默认矩阵逐题不变，
-  只能通过 `buildMatrix(extraTopics)` 临时追加考点。
-- **改引擎的流程**：改 → `npm run sync:engine` → `npm run check:sync` → `npm test`
-  → 拿线上样本回归（`.workbuddy/smoke/<run>/questions.jsonl` 里的已放行题重跑 `issues()`，
-  确认没有题被**新误伤**）。
-- **新增回归测试时要跑反向对照**：把修复临时撤销，确认新测试真的会红。
-  本轮就是这么做才发现一条断言恒真的（见下）。
-- ⚠️ **测试辅助函数也会写错语义**：`wrong-canonical.cjs` 的 derivative 分支曾用
-  `agreesWithDerivative(body, candidate)`，而它算的是 **`g′` 与 `body`** 比较
-  （对不定积分成立，因为 body 是被积函数）。用到导数题上变成比 `f(x)` 与 `g′(x)`，
-  实测对**正确答案**同样返回 `ok=0` → `assert.equal(check.ok, 0)` **恒真**，空转。
-  已改用 `functionDerivativeMatches()`（算 `f′`）并加**反向守卫**：
-  同一个复核必须认得出该条语料的正解。
+- `npm test` 跑 `tests/*.cjs`（Node 22 下 `node --test tests/` 不认目录）。当前 249 通过。
+- 分类：`math-engine`、`fallback-bank`/`fallback-audit`、`wiring`（接线契约）、
+  `reliability`（端到端 + 真实事故复现）、`pipeline-v3`、`smoke-matrix`、
+  `canonical-freeze`、`wrong-canonical`、`protocol-health`、`prefetch-race`、`client-retry`。
+- **改引擎流程**：改 → `sync:engine` → `check:sync` → `npm test` → 拿线上样本回归
+  （`.workbuddy/smoke/<run>/questions.jsonl` 重跑 `issues()`，确认没有题被新误伤）。
+- **新增回归测试要跑反向对照**（临时撤销修复，确认测试真的会红）。
+- ⚠️ **测试辅助函数也会写错语义**：`wrong-canonical.cjs` 的 derivative 分支曾比
+  `f(x)` 与 `g′(x)`，对正确答案也返回 `ok=0` → 断言恒真空转。已改用
+  `functionDerivativeMatches()` 并加反向守卫（同一复核要认得出正解）。
 
-## 线上评测
-- `npm run smoke -- --label <名>`（`tools/smoke/`）。
-  **开跑前先查 `?health=1`**，后端没升级直接拒跑（这是被
-  「以为部署了、其实没部署」坑过之后加的）——除非显式 `--allow-old-server`。
-- 报告里的「部署指纹」段会同时报 `judge_layer`（Task #4）与
-  `gate_policy`（Task 5K）；不匹配时明说「本次数字不能当验收依据」。
-- `node tools/smoke/compare.mjs <before.json> <after.json>` 出前后对比表。
+## 线上评测 / 探针
+- `npm run smoke -- --label <名>`。**开跑前先查 `?health=1`**，后端没升级直接拒跑
+  （除非 `--allow-old-server`）。报告「部署指纹」段同时报 `judge_layer` 与 `gate_policy`，
+  不匹配时明说「本次数字不能当验收依据」。
+- `node tools/smoke/compare.mjs <before.json> <after.json>` 出前后对比。
 - 两条零容忍指标：`Wrong approved`、`错答探针被误批为对`。
 - `npm run probe:local -- --reuse <questions.jsonl> [--sample N] [--out DIR]`：
-  不碰网络，直接把探针喂本地引擎。「错答放行 = 0」在这一层**可证**，无需部署。
-- 探针设计两条硬规矩：① 探针的「错」必须由代数构造，**不能**用判题入口判断（自证）；
+  不碰网络喂本地引擎，「错答放行 = 0」在这一层可证。
+- 探针两条硬规矩：① 探针的「错」必须由**代数构造**，不能用判题入口判断（自证）；
   ② `2·答案`/`-答案` 在不定积分与「参考答案恒为 0」两种情形下本身正确，必须显式跳过。
 
 ## 浏览器验收（`npm run verify:browser`）
-- 入口 `tools/browser-verify/run.sh`：起本地静态服务 + `agent-browser`，
-  注入 `01-setup.js` 接管 `window.fetch`（**不需要真后端**）。
+- `tools/browser-verify/run.sh`：本地静态服务 + `agent-browser`，
+  `01-setup.js` 接管 `window.fetch`（**不需要真后端**）。
   跑法：`agent-browser open` → `eval "$(cat 01-setup.js)"` → 真实点击 →
   `eval "$(cat NN-scenario-x.js)"` 读回 JSON 断言。
-- `01-setup.js` 的开关：`generateFailures` / `judgeFailures` / `holdGenerate` /
-  `offline` / `versions`。
-- **改 mock 时要跟着响应契约一起改**：新客户端校验的字段（`versions`、`request_id` 回显）
-  mock 不回显的话，那些校验在浏览器里等于没测。
-- **断言红之前先分清「产品错了 / 场景陈旧 / harness 坏了」**。
-- ⚠️ **前端改动之后必须跑真实浏览器**，不能只看 `npm test`。
-  最贵的那个 bug（网络故障被报成「题目有问题」）就是拦截接口后在浏览器里复现出来的。
+  开关：`generateFailures` / `judgeFailures` / `holdGenerate` / `offline` / `versions`。
+- **改 mock 要跟响应契约一起改**（`versions`、`request_id` 回显），否则那些校验等于没测。
+- ⚠️ **前端改完必须跑真实浏览器**，不能只看 `npm test`。
+  最贵的 bug（网络故障被报成「题目有问题」）就是拦截接口后在浏览器里复现的。
+- `agent-browser` 不在 PATH：`export PATH="$HOME/.workbuddy/binaries/node/workspace/node_modules/.bin:$PATH"`。
+- `agent-browser open --init-script <js>` 可给指定 URL 的 `fetch` 人为加延迟，
+  不改产品代码就能复现超时类故障（含腾讯云「风险提醒」拦截页，每会话必现需重新点）。

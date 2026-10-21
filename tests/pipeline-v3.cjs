@@ -86,6 +86,7 @@ function backend(file) {
     module: { exports: {} },
     process,
     console: console_,
+    AbortController,
     AbortSignal,
     URL,
     setTimeout,

@@ -1,5 +1,6 @@
 const Quality = require('../math-quality');
 module.exports = async function handler(req, res) {
+  const ingressDeadline = Date.now() + REQUEST_BUDGET_MS;
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET' && req.query?.health === '1') {
@@ -18,27 +19,29 @@ module.exports = async function handler(req, res) {
 
   if (!apiKey) {
     return res.status(500).json({
-      error: 'DEEPSEEK_API_KEY is not configured.'
+      error: 'AI service is not configured.', code: 'SERVICE_NOT_CONFIGURED', stage: 'configuration', retryable: false
     });
   }
 
   const body = req.body || {};
+  if (typeof body !== 'object' || Array.isArray(body)) return res.status(400).json({ error: 'Request body must be a JSON object', code: 'INVALID_REQUEST', retryable: false });
   const action = body.action;
+  const disconnect = requestCancellation(req, res);
 
   try {
     if (action === 'generate') {
-      const result = await generateQuestions(apiKey, body);
-      return res.status(200).json(result);
+      const result = await withinBudget(body, () => generateQuestions(apiKey, body), disconnect, ingressDeadline);
+      return res.status(200).json(withResponseMeta(result, body));
     }
 
     if (action === 'judge') {
-      const result = await judgeAnswer(apiKey, body);
-      return res.status(200).json(result);
+      const result = await withinBudget(body, () => judgeAnswer(apiKey, body), disconnect, ingressDeadline);
+      return res.status(200).json(withResponseMeta(result, body));
     }
 
     if (action === 'evaluate') {
-      const result = await evaluateQuestionDifficulty(apiKey, body);
-      return res.status(200).json(result);
+      const result = await withinBudget(body, () => evaluateQuestionDifficulty(apiKey, body), disconnect, ingressDeadline);
+      return res.status(200).json(withResponseMeta(result, body));
     }
 
     return res.status(400).json({ error: 'Unknown action' });
@@ -46,22 +49,8 @@ module.exports = async function handler(req, res) {
   } catch (error) {
     console.error('DeepSeek API error:', error);
 
-    const upstreamStatus = Number(error?.statusCode);
-    const status =
-      Number.isInteger(upstreamStatus) &&
-      upstreamStatus >= 400 &&
-      upstreamStatus < 600
-        ? upstreamStatus
-        : 500;
-
-    return res.status(status).json({
-      error: error.message || 'DeepSeek request failed',
-      code: error?.code || null,
-      rejection_reasons: Array.isArray(error?.rejectionReasons)
-        ? error.rejectionReasons
-        : undefined,
-      versions: versions()
-    });
+    const failure = failureResponse(error, body);
+    return res.status(failure.status).json(failure.data);
   }
 };
 
@@ -90,6 +79,69 @@ const PIPELINE = {
   math_engine: Quality.VERSION
 };
 
+const requestContext = new (require('node:async_hooks').AsyncLocalStorage)();
+const REQUEST_BUDGET_MS = 30000; // 35s SCF cap, 5s for ingress/serialization/gateway.
+
+function deadlineError() {
+  return Object.assign(new Error('AI request budget exhausted'), {
+    code: 'UPSTREAM_TIMEOUT', stage: 'deadline', statusCode: 504, retryable: false
+  });
+}
+
+function requestCancellation(req, res) {
+  const controller = new AbortController();
+  req.once?.('aborted', () => controller.abort());
+  res.once?.('close', () => { if (!res.writableEnded) controller.abort(); });
+  return controller.signal;
+}
+
+async function withinBudget(body, work, signal, ingressDeadline = Infinity) {
+  if (requestContext.getStore()) return work();
+  const budget = Math.max(1, Math.min(REQUEST_BUDGET_MS, ingressDeadline - Date.now(), Number(body?.budget_ms) > 0 ? Number(body.budget_ms) : REQUEST_BUDGET_MS));
+  const controller = new AbortController();
+  const ctx = { deadline: Date.now() + budget, signal: controller.signal, body };
+  let timer, onAbort;
+  try {
+    if (signal?.aborted) throw Object.assign(deadlineError(), { code: 'REQUEST_CANCELLED' });
+    return await requestContext.run(ctx, () => Promise.race([
+      work(),
+      new Promise((_, reject) => {
+        onAbort = () => { controller.abort(); reject(Object.assign(deadlineError(), { code: 'REQUEST_CANCELLED' })); };
+        signal?.addEventListener('abort', onAbort, { once: true });
+      }),
+      new Promise((_, reject) => { timer = setTimeout(() => {
+        controller.abort(); reject(deadlineError());
+      }, budget); })
+    ]));
+  } finally { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); }
+}
+
+function failureResponse(error, body) {
+  const code = error?.code || 'INTERNAL_ERROR';
+  const quality = /^(GENERATION_|UNVERIFIED_|CANONICAL_|ANSWER_|SOLUTION_)/.test(code);
+  const timeout = code === 'UPSTREAM_TIMEOUT' || /Timeout|Abort/.test(error?.name || '');
+  const format = /PROTOCOL|EMPTY_CONTENT|FORMAT/.test(code);
+  const network = code === 'UPSTREAM_UNREACHABLE';
+  const stage = quality ? 'quality' : timeout ? 'timeout' : format ? 'format' : network ? 'network'
+    : code === 'REQUEST_CANCELLED' ? 'cancelled' : code === 'INVALID_REQUEST' ? 'request'
+    : code.startsWith('UPSTREAM_') ? 'model' : 'internal';
+  const status = quality ? 422 : format ? 422 : timeout || network || code.startsWith('UPSTREAM_') ? 424
+    : Number(error?.statusCode) >= 400 ? Number(error.statusCode) : 500;
+  return { status, data: withResponseMeta({
+    ok: false, error: error.message || 'Internal server error', code, stage,
+    reason_code: error.reasonCode || code,
+    upstream_status: code.startsWith('UPSTREAM_') ? (Number(error.statusCode) || null) : null,
+    subreason: error.rejectionReasons?.[0] || null,
+    retryable: error?.retryable ?? (!quality && !format && !timeout && code !== 'REQUEST_CANCELLED' && isRetryable(error)),
+    retry_after_ms: error.retryAfterMs || 0,
+    fallback_allowed: body?.action === 'generate',
+    report_service_error: !quality,
+    gate_state: error.gateState || null, tier: error.tier || null,
+    rejection_reasons: error.rejectionReasons || [],
+    attempt_history: error.attemptHistory || [], gate_policy: Quality.GATE_POLICY
+  }, body) };
+}
+
 function versions() {
   return { ...PIPELINE };
 }
@@ -107,6 +159,7 @@ function versions() {
 function withResponseMeta(result, body) {
   return {
     ...result,
+    delivery_contract: 'v1.2-safe-merge',
     request_id: body?.request_id ?? null,
     session_id: body?.session_id ?? null,
     question_sequence: body?.question_sequence ?? null,
@@ -124,6 +177,10 @@ function healthPayload(configured) {
   return {
     ok: Boolean(configured),
     service: 'deepseek',
+    delivery_contract: 'v1.2-safe-merge',
+    request_budget_ms: REQUEST_BUDGET_MS,
+    generation_http_retry_safe: false,
+    deduplication_scope: 'process-120s',
     adaptiveDifficultyModel: 'v0-provisional',
     protocol_version: PIPELINE.protocol,
     generator_version: PIPELINE.generator,
@@ -140,39 +197,13 @@ function healthPayload(configured) {
 }
 
 
-/*
-=========================================================
-DeepSeek request：超时 / 重试 / 退避 / 错误分类
-
-只有「再试一次可能成功」的错误才重试 —— 429、5xx、网络中断、超时。
-参数错误、鉴权失败、返回体不是 JSON，重试多少次都一样，直接抛。
-
-预算（Task 5F 重新核定）：以前客户端的 generate 超时是 190s，这个数字不是
-算出来的，是照着「两次生成 + 两次复核」的最坏情况配出来的。它的代价是：
-真的走到那一步时，用户对着「正在准备题目…」等三分多钟，而这段时间里
-已校验的备用题库本来可以立刻兜住。
-
-现在按「一次往返的真实耗时」定预算，客户端再乘上它自己的重试次数：
-
-  generate  25s   单题草稿生成，模型典型 8~15s
-  review    18s   复核是一次短调用（只回一个 JSON）
-  judge     20s   判题预算收在 20s，客户端的判题超时是 22s —— 客户端的
-                  重试因此总是发生在服务端已经放弃之后，不会出现
-                  「服务端还在算、客户端已经重试、同一道题被算两遍」
-  evaluate  12s   难度标定，失败不影响出题（有 provisional 兜底）
-
-内层重试与外层重试的分工：generateQuestions 外层已有 2 次尝试（闸门拒稿时
-重来一次），所以生成链路内层不再重试，否则 4 次模型调用会把预算顶死。
-判题、评估这类短调用才允许内层重试。
-
-judge 的内层重试从 2 次收成 1 次：客户端（Task 5F）现在会自动重试一次，
-两层都重试等于同一道题最多算 4 次。
-=========================================================
-*/
+/* Every stage shares the request's absolute 30s deadline. Generation has at most
+   two drafts, 9s each, and one 5s review per candidate (28s theoretical total).
+   Judge/evaluate retain bounded recovery inside the same platform deadline. */
 
 const CALL_POLICY = {
-  generate: { attempts: 1, timeoutMs: 25000, backoffMs: 0 },
-  review: { attempts: 2, timeoutMs: 18000, backoffMs: 800 },
+  generate: { attempts: 1, timeoutMs: 9000, backoffMs: 0 },
+  review: { attempts: 1, timeoutMs: 5000, backoffMs: 0 },
   judge: { attempts: 1, timeoutMs: 20000, backoffMs: 0 },
   evaluate: { attempts: 2, timeoutMs: 12000, backoffMs: 500 }
 };
@@ -219,7 +250,7 @@ function sleep(ms) {
 /* 上游返回的 body 不一定能当 JSON 读：网关 502 会回 HTML 页面。
    直接 response.json() 会抛 "Unexpected token '<'"，把真实的 502 掩盖成 500。 */
 async function readUpstreamJson(response) {
-  const text = await response.text().catch(() => '');
+  const text = await response.text();
 
   try {
     return JSON.parse(text);
@@ -244,18 +275,25 @@ async function callDeepSeek(
   label = 'generate'
 ) {
   const policy = policyFor(label);
+  const ctx = requestContext.getStore();
   let lastError;
 
   for (let attempt = 1; attempt <= policy.attempts; attempt++) {
     try {
-      return await callDeepSeekOnce(
+      const remaining = ctx ? ctx.deadline - Date.now() : policy.timeoutMs;
+      if (remaining < 250 || ctx?.signal.aborted) throw deadlineError();
+      const startedAt = Date.now();
+      const value = await callDeepSeekOnce(
         apiKey,
         messages,
         maxTokens,
         temperature,
-        policy.timeoutMs,
+        Math.min(policy.timeoutMs, remaining),
         label
       );
+      console.log(JSON.stringify({ event: 'deepseek_call_succeeded', request_id: ctx?.body?.request_id ?? null,
+        label, attempt, latency_ms: Date.now() - startedAt, versions: versions() }));
+      return value;
     } catch (error) {
       lastError = error;
 
@@ -263,6 +301,7 @@ async function callDeepSeek(
 
       console.warn(JSON.stringify({
         event: 'deepseek_call_failed',
+        request_id: ctx?.body?.request_id ?? null,
         label,
         attempt,
         attempts: policy.attempts,
@@ -297,7 +336,9 @@ async function callDeepSeekOnce(
       'https://api.deepseek.com/chat/completions',
       {
         method: 'POST',
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: requestContext.getStore()
+          ? AbortSignal.any([AbortSignal.timeout(timeoutMs), requestContext.getStore().signal])
+          : AbortSignal.timeout(timeoutMs),
 
         headers: {
           'Content-Type': 'application/json',
@@ -338,7 +379,15 @@ async function callDeepSeekOnce(
     throw wrapped;
   }
 
-  const data = await readUpstreamJson(response);
+  let data;
+  try { data = await readUpstreamJson(response); }
+  catch (error) {
+    if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+      throw Object.assign(error, { code: 'UPSTREAM_TIMEOUT', statusCode: 504 });
+    }
+    if (error.name === 'TypeError') throw Object.assign(error, { code: 'UPSTREAM_UNREACHABLE', statusCode: 502 });
+    throw error;
+  }
 
   if (!response.ok) {
     const error = new Error(
@@ -347,6 +396,8 @@ async function callDeepSeekOnce(
     );
 
     error.statusCode = response.status;
+    const retryAfter = response.headers?.get('retry-after');
+    error.retryAfterMs = retryAfter ? Math.max(0, /^\d+(?:\.\d+)?$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now()) : 0;
     error.code =
       response.status === 429
         ? 'UPSTREAM_RATE_LIMITED'
@@ -467,7 +518,8 @@ function moduleGuidance(module) {
 模块：极限。
 可使用的难度来源包括但不限于：
 等价无穷小、重要极限、洛必达、泰勒展开、变量替换、
-主导项判断、分段/参数极限、数列或函数极限结构识别、多方法组合。
+主导项判断、显式初等函数的极限结构识别、多方法组合。
+不使用分段、参数族、数列求和或未支持的特殊函数。
 高等级不能只靠把数字写得很丑。
 ${common}
 `;
@@ -487,8 +539,8 @@ ${common}
   return `
 模块：积分。
 可使用的难度来源包括但不限于：
-换元、分部积分、有理函数、三角积分、定积分技巧、反常积分、
-参数结构、多种换元组合、对称性与结构识别。
+换元、分部积分、有理函数、三角积分、有限区间定积分技巧、
+多种换元组合、对称性与结构识别。不使用待定参数或反常积分。
 L8 以上允许明显复杂；L10–L12 可进入竞赛型微积分计算与技巧，
 但仍要求有明确标准答案，暂不生成纯证明题。
 ${common}
@@ -599,11 +651,24 @@ ${planText}
 - 隐函数方程（如 x^2+xy+y^2=1 求 dy/dx）
 - 参数方程（如 x=t-\\sin t, y=1-\\cos t）
 - 三阶及以上高阶导数
-- 在 expression 里附写求值点（如 "y=\\ln(1+x^2), y''(1)"）；要考求值就单独说明，
-  不要在表达式里混入 \\quad y''(1) 这类文字
+- 点值求导题（当前协议只验证完整导函数，instruction 与 expression 都不得要求在某点求值）
 
 积分模块禁止：
 - 被积函数写不成初等函数表达式的形态（正常的换元、分部、有理函数、三角有理式都可以）
+
+【引擎能力边界与答案自检】
+- 只用显式初等函数、数字常数和变量 x；不使用下标变量、参数族、未知特殊函数。
+- 如使用带底对数，仅支持 log_2(x)、log_{10}(x) 的明确常数底写法；其他底改写为 ln 比值。
+- 高难导数可组合乘积/商法则、多层复合、对数求导及一二阶求导；至少说明方法识别与耦合点。
+  不得仅给常规单步骤导数贴 L12 标签，不得降低 targetDifficulty 以换取审核通过。
+- 不定积分在提交前必须对最终原函数（不含 C）求导，与被积函数回代比较；
+  检查链式因子、正负号、ln 绝对值和定义域。回代不相同就重新设计，禁止解释掩盖错误。
+- 解答最后用“最终答案为”给出明确最终结论；中间极限必须注明“第一项/第二项”等局部身份。
+
+【本轮修稿反馈】
+${JSON.stringify(body.regenerationFeedback || null)}
+若有上一轮拒因：区分解析/数值能力不足与数学错误；选择同目标难度、同指定考点下的其他可验证结构。
+禁止再次使用被拒题的原表达式、仅换常数或只改说法。若指定考点确实无法表达为支持形态，禁止伪称满足考点。
 
 【正确写法示例】
 - 极限：\\lim_{x\\to0}\\frac{\\sin 3x}{2x}、\\lim_{x\\to\\infty}\\frac{2x+1}{x-3}
@@ -651,7 +716,7 @@ solution 中每一个数学表达式必须使用 \\\\( ... \\\\) 包裹。
 
 【避免重复】
 尽量避免与以下近期题目高度相似：
-${JSON.stringify(avoidPrompts.slice(0, 6))}
+${JSON.stringify(avoidPrompts.slice(-10))}
 
 严格返回 JSON：
 
@@ -706,7 +771,11 @@ questions 数量必须为 ${cleanPlans.length}。
   );
 
   if (!Array.isArray(generated.questions)) {
-    throw new Error('Invalid questions returned by DeepSeek.');
+    throw Object.assign(new Error('Invalid questions returned by DeepSeek.'), { code: 'UPSTREAM_FORMAT_ERROR' });
+  }
+
+  if (generated.questions.some(q => !q || typeof q !== 'object' || Array.isArray(q))) {
+    throw Object.assign(new Error('Invalid question object'), { code: 'UPSTREAM_FORMAT_ERROR' });
   }
 
   const questions = generated.questions
@@ -1121,18 +1190,75 @@ function applyMetadataCorrection(q, verification) {
   q.metadataCorrection = correction;
 }
 
+// Bounded in-process protection for replayed request IDs. No database or learner-state changes.
+// This is deliberately not advertised as cross-instance or provider-level exactly-once billing.
+const generationRequests = new Map();
+const GENERATION_REPLAY_TTL_MS = 120000;
+const GENERATION_REPLAY_MAX = 256;
+
+function generationFingerprint(value, root = true) {
+  if (Array.isArray(value)) return value.map(item => generationFingerprint(item, false));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
+    .filter(k => !root || !['attempt', 'budget_ms', 'delivery_contract'].includes(k))
+    .map(k => [k, generationFingerprint(value[k], false)]));
+  return value;
+}
+
 async function generateQuestions(apiKey, body) {
+  const run = () => withinBudget(body, () => generateWithinBudget(apiKey, body));
+  const id = body?.request_id;
+  if (!id) return run(); // Legacy direct callers retain the existing contract.
+  if (typeof id !== 'string' || id.length > 160) {
+    throw Object.assign(new Error('Invalid request identity'), { code: 'INVALID_REQUEST', statusCode: 400, retryable: false });
+  }
+  const now = Date.now();
+  for (const [key, entry] of generationRequests) if (entry.expiresAt <= now) generationRequests.delete(key);
+  const signature = require('node:crypto').createHash('sha256')
+    .update(JSON.stringify(generationFingerprint(body))).digest('hex');
+  const existing = generationRequests.get(id);
+  if (existing) {
+    if (existing.signature !== signature) throw Object.assign(new Error('Request identity reused with different input'), {
+      code: 'REQUEST_ID_CONFLICT', statusCode: 409, retryable: false
+    });
+    console.log(JSON.stringify({ event: 'generation_request_reused', request_id: id, scope: 'process' }));
+    return existing.promise;
+  }
+  if (generationRequests.size >= GENERATION_REPLAY_MAX) throw Object.assign(new Error('Generation request capacity reached'), {
+    code: 'REQUEST_CAPACITY', statusCode: 429, retryable: false
+  });
+  const ctx = requestContext.getStore();
+  const entry = { signature, expiresAt: now + GENERATION_REPLAY_TTL_MS, promise: null };
+  entry.promise = Promise.resolve().then(async () => {
+    if (!ctx) return run();
+    let onAbort;
+    try {
+      if (ctx.signal.aborted) throw deadlineError();
+      return await Promise.race([run(), new Promise((_, reject) => {
+        onAbort = () => reject(deadlineError());
+        ctx.signal.addEventListener('abort', onAbort, { once: true });
+      })]);
+    } finally { if (onAbort) ctx.signal.removeEventListener('abort', onAbort); }
+  });
+  generationRequests.set(id, entry);
+  return entry.promise;
+}
+
+async function generateWithinBudget(apiKey, body) {
   const attempts = 2;
   const rejections = [];
+  const attemptHistory = [];
+  const rejectedExpressions = [];
+  let regenerationFeedback = null;
   const startedAt = Date.now();
   let lastError;
   let lastState = null;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      const result = await generateDraftQuestions(apiKey, { ...body, count: 1 });
+      const result = await generateDraftQuestions(apiKey, { ...body, count: 1, regenerationFeedback,
+        avoidPrompts: [...(body.avoidPrompts || []), ...rejectedExpressions] });
 
-      if (result.questions.length !== 1) throw new Error('Invalid question count');
+      if (result.questions.length !== 1) throw Object.assign(new Error('Invalid question count'), { code: 'UPSTREAM_FORMAT_ERROR' });
 
       for (const q of result.questions) {
         q.question_id = require('crypto').randomUUID();
@@ -1144,22 +1270,28 @@ async function generateQuestions(apiKey, body) {
         q.math_engine_version = PIPELINE.math_engine;
         q.status = 'draft';
 
-        q.verification = await reviewQuestion(apiKey, {
-          question: q,
-          plan: body.plans?.[0]
-        });
-
-        /* Task 5C：闸门由「schema + 确定性验证/矛盾检测 + 答案解析一致性 +
-           reviewer」共同决定，结论是三态。
-
-           注意这里用的是 gateDecision 而不是 approved —— 后者对 Tier C
-           （引擎验不了的形态）是放行的，那是判题阶段的口径。
-           生成阶段只有 VERIFIED 才算过：UNCERTAIN 意味着「我们没验证过」，
-           不能靠模型自己的话把它当高可信题发给学生。 */
-        const decision = Quality.gateDecision(q);
+        // Unsupported / numerically undecidable candidates cannot pass; do not spend a reviewer call on them.
+        const localIssues = Quality.issues(q);
+        const profile = Quality.verificationProfile(q);
+        let decision;
+        if (!localIssues.length && profile.verdict === 'uncertain') {
+          decision = { ok: false, state: Quality.GATE.UNCERTAIN, tier: profile.tier,
+            code: profile.readable ? 'UNVERIFIED_ANSWER' : 'UNVERIFIED_SHAPE', reason: profile.reason };
+        } else {
+          q.verification = await reviewQuestion(apiKey, { question: q, plan: body.plans?.[0] });
+          decision = Quality.gateDecision(q); // All VERIFIED candidates still require every hard reviewer field.
+        }
 
         if (!decision.ok) {
           const reasons = decision.issues || [decision.code || 'UNKNOWN'];
+          rejectedExpressions.push(q.expression || q.prompt || '');
+          regenerationFeedback = {
+            category: decision.state === Quality.GATE.UNCERTAIN ? 'validator_capability' : 'quality_rejected',
+            reasons, shape_reason: profile.reason, deterministic: profile.verdict,
+            hard_fields: q.verification?.hard_fields || null,
+            previous_expression: q.expression || q.prompt || '',
+            required_action: 'different_supported_structure_same_topic_and_target_difficulty'
+          };
           const unverified = decision.state === Quality.GATE.UNCERTAIN;
 
           rejections.push(reasons);
@@ -1194,6 +1326,9 @@ async function generateQuestions(apiKey, body) {
           );
 
           error.code = unverified ? 'GENERATION_UNVERIFIED' : 'GENERATION_REJECTED';
+          error.reasonCode = q.verification?.canonical_suspected === true ||
+            q.verification?.issues?.some(reason => /CANONICAL|INDEPENDENT_ANSWER_DISAGREES/.test(reason))
+            ? 'CANONICAL_UNTRUSTED' : unverified ? decision.code : 'GENERATION_REJECTED';
           error.gateState = decision.state;
           error.tier = decision.tier ?? null;
           throw error;
@@ -1241,8 +1376,14 @@ async function generateQuestions(apiKey, body) {
 
     } catch (error) {
       lastError = error;
-      // 上游故障时重试是必要的；闸门拒稿时重试是在赌模型下一次能出对。
-      // 两次都拒，说明这个难度下这条路走不通，交给前端走备用题。
+      attemptHistory.push({ attempt, code: error.code || 'INTERNAL_ERROR', gate_state: error.gateState || null,
+        feedback: regenerationFeedback });
+      const quality = /^(GENERATION_REJECTED|GENERATION_UNVERIFIED)$/.test(error.code || '');
+      if (!quality && !isRetryable(error)) break;
+      const delay = quality ? 0 : Math.max(600, error.retryAfterMs || 0);
+      if (requestContext.getStore()?.deadline - Date.now() < 14000 + delay) break;
+      if (attempt < attempts) await sleep(delay);
+
     }
   }
 
@@ -1251,14 +1392,10 @@ async function generateQuestions(apiKey, body) {
   /* 拒稿原因分成两类，前端据此决定「换一道重试」还是「直接退备用题」：
        GENERATION_UNVERIFIED  引擎验不了 → 重试同一难度大概率还是验不了
        GENERATION_REJECTED    数学上明确有问题 → 重试有意义 */
-  if (!error.code) {
-    error.code = lastState === Quality.GATE.UNCERTAIN
-      ? 'GENERATION_UNVERIFIED'
-      : 'GENERATION_REJECTED';
-  }
 
   error.gateState = lastState;
   error.rejectionReasons = rejections.flat();
+  error.attemptHistory = attemptHistory;
   error.versions = versions();
 
   /* 两次都没过闸门 —— 这是出题链路最终的失败点，必须留下一条带请求身份、
