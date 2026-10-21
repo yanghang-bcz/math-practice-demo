@@ -3,7 +3,7 @@
 > Adaptive Calculus Practice for Chinese Postgraduate Entrance Exams
 
 **在线体验：**  
-https://calcdaily-calcdaily-d5g2titwue91551fb.webapps.tcloudbase.com/
+calcdaily.cn
 
 ---
 
