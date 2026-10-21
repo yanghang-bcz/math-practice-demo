@@ -1,0 +1,1470 @@
+{
+  "health": {
+    "ok": true,
+    "service": "deepseek",
+    "adaptiveDifficultyModel": "v0-provisional",
+    "protocol_version": 2,
+    "generator_version": "generator-v2",
+    "reviewer_version": "reviewer-v2",
+    "judge_version": "judge-v2",
+    "math_engine_version": "quality-v2",
+    "gate_policy": "strict-tier-b",
+    "pipeline": {
+      "protocol": 2,
+      "generator": "generator-v2",
+      "reviewer": "reviewer-v2",
+      "judge": "judge-v2",
+      "math_engine": "quality-v2"
+    }
+  },
+  "requests": [
+    {
+      "index": 1,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "limit",
+            "topic": null,
+            "targetDifficulty": 4,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-01",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 1
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "limit",
+            "topic": "等价无穷小与泰勒展开",
+            "difficulty": 4,
+            "selfEstimatedDifficulty": 4,
+            "difficultyDimensions": {
+              "recognition": 4,
+              "techniqueDepth": 4,
+              "calculationComplexity": 3,
+              "knowledgeCoupling": 4
+            },
+            "instruction": "计算极限",
+            "expression": "\\lim_{x\\to0}\\frac{e^{x^2}-1-x^2}{x^4}",
+            "answer": "1/2",
+            "solution": "利用 \\(e^{x^2}=1+x^2+\\frac{x^4}{2}+o(x^4)\\)，代入得 \\(e^{x^2}-1-x^2=\\frac{x^4}{2}+o(x^4)\\)，故极限为 \\(\\frac12\\)。",
+            "keySteps": [
+              "展开 \\(e^{x^2}\\) 到 \\(x^4\\) 项",
+              "分子化简为 \\(\\frac{x^4}{2}+o(x^4)\\)",
+              "除以 \\(x^4\\) 取极限得 \\(\\frac12\\)"
+            ],
+            "provisionalDifficulty": 4,
+            "estimatedDifficulty": 4,
+            "difficultyConfidence": 0.4,
+            "question_id": "386f3da9-a925-4ff9-9756-98aa9677e546",
+            "id": "386f3da9-a925-4ff9-9756-98aa9677e546",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": true,
+              "suggested_topic": "",
+              "suggested_difficulty": 4,
+              "canonical_suspected": false,
+              "confidence": 0.99,
+              "independent_answer": "1/2",
+              "issues": [],
+              "reason": "e^{x^2} 展开到 x^4 项得 1+x^2+x^4/2+o(x^4)，分子为 x^4/2+o(x^4)，除以 x^4 极限为 1/2，答案与解析均正确。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "limit_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": null,
+              "content": "[\"limit\",\"等价无穷小与泰勒展开\",\"计算极限\",\"\\\\lim_{x\\\\to0}\\\\frac{e^{x^2}-1-x^2}{x^4}\",\"\",\"1/2\",\"利用 \\\\(e^{x^2}=1+x^2+\\\\frac{x^4}{2}+o(x^4)\\\\)，代入得 \\\\(e^{x^2}-1-x^2=\\\\frac{x^4}{2}+o(x^4)\\\\)，故极限为 \\\\(\\\\frac12\\\\)。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A"
+          }
+        ],
+        "attempts": 1,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-01",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 1
+      }
+    },
+    {
+      "index": 2,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "derivative",
+            "topic": null,
+            "targetDifficulty": 12,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-02",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 2
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "derivative",
+            "topic": "幂指函数与多层链式求导",
+            "difficulty": 12,
+            "selfEstimatedDifficulty": 12,
+            "difficultyDimensions": {
+              "recognition": 12,
+              "techniqueDepth": 12,
+              "calculationComplexity": 11,
+              "knowledgeCoupling": 12
+            },
+            "instruction": "求导数 y'",
+            "expression": "y=\\left(\\frac{x}{1+x}\\right)^{\\ln(1+x)}",
+            "answer": "\\left(\\frac{x}{1+x}\\right)^{\\ln(1+x)}\\left[\\frac{\\ln(1+x)}{x(1+x)}+\\frac{\\ln\\frac{x}{1+x}}{1+x}\\right]",
+            "solution": "取对数 \\(\\ln y=\\ln(1+x)\\ln\\frac{x}{1+x}\\)，两边对 \\(x\\) 求导得 \\(\\frac{y'}{y}=\\frac{\\ln(1+x)}{x(1+x)}+\\frac{\\ln\\frac{x}{1+x}}{1+x}\\)，再乘回 \\(y\\)。",
+            "keySteps": [
+              "取对数：\\(\\ln y=\\ln(1+x)\\ln\\frac{x}{1+x}\\)",
+              "对 \\(x\\) 求导：\\(\\frac{y'}{y}=\\frac{\\ln(1+x)}{x(1+x)}+\\frac{\\ln\\frac{x}{1+x}}{1+x}\\)",
+              "回代 \\(y\\) 得结果"
+            ],
+            "provisionalDifficulty": 12,
+            "estimatedDifficulty": 12,
+            "difficultyConfidence": 0.4,
+            "question_id": "0e0669ce-84b7-409a-977a-2417e42c4715",
+            "id": "0e0669ce-84b7-409a-977a-2417e42c4715",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": true,
+              "suggested_topic": "",
+              "suggested_difficulty": 12,
+              "canonical_suspected": false,
+              "confidence": 0.97,
+              "independent_answer": "y'=(x/(1+x))^{ln(1+x)}·[ln(1+x)/(x(1+x))+ln(x/(1+x))/(1+x)]",
+              "issues": [],
+              "reason": "对数求导法正确，导数结果与参考答案一致，定义域x>0下成立。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "derivative_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": null,
+              "content": "[\"derivative\",\"幂指函数与多层链式求导\",\"求导数 y'\",\"y=\\\\left(\\\\frac{x}{1+x}\\\\right)^{\\\\ln(1+x)}\",\"\",\"\\\\left(\\\\frac{x}{1+x}\\\\right)^{\\\\ln(1+x)}\\\\left[\\\\frac{\\\\ln(1+x)}{x(1+x)}+\\\\frac{\\\\ln\\\\frac{x}{1+x}}{1+x}\\\\right]\",\"取对数 \\\\(\\\\ln y=\\\\ln(1+x)\\\\ln\\\\frac{x}{1+x}\\\\)，两边对 \\\\(x\\\\) 求导得 \\\\(\\\\frac{y'}{y}=\\\\frac{\\\\ln(1+x)}{x(1+x)}+\\\\frac{\\\\ln\\\\frac{x}{1+x}}{1+x}\\\\)，再乘回 \\\\(y\\\\)。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A"
+          }
+        ],
+        "attempts": 1,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-02",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 2
+      }
+    },
+    {
+      "index": 3,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "integral",
+            "topic": null,
+            "targetDifficulty": 8,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-03",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 3
+      },
+      "response": {
+        "error": "Question quality gate rejected draft: GENERATION_REJECTED",
+        "code": "GENERATION_REJECTED",
+        "rejection_reasons": [
+          "GENERATION_REJECTED",
+          "GENERATION_REJECTED"
+        ],
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        }
+      }
+    },
+    {
+      "index": 4,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "limit",
+            "topic": null,
+            "targetDifficulty": 8,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-04",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 4
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "limit",
+            "topic": "泰勒展开与等价无穷小组合",
+            "difficulty": 8,
+            "selfEstimatedDifficulty": 8,
+            "difficultyDimensions": {
+              "recognition": 8,
+              "techniqueDepth": 8,
+              "calculationComplexity": 7,
+              "knowledgeCoupling": 8
+            },
+            "instruction": "计算极限",
+            "expression": "\\lim_{x\\to0}\\frac{\\ln(1+x^2)-x\\sin x}{x^2(e^{x^2}-1)}",
+            "answer": "-\\frac{1}{3}",
+            "solution": "分母 \\(x^2(e^{x^2}-1)\\sim x^4\\)。分子用泰勒：\\(\\ln(1+x^2)=x^2-\\frac{x^4}{2}+o(x^4)\\)，\\(x\\sin x=x^2-\\frac{x^4}{6}+o(x^4)\\)，故分子 \\(=-\\frac{x^4}{3}+o(x^4)\\)。极限为 \\(-\\frac{1}{3}\\)。",
+            "keySteps": [
+              "分母等价替换为 \\(x^4\\)",
+              "分子展开到 \\(x^4\\) 项",
+              "相减得 \\(-\\frac{x^4}{3}\\)，求比值"
+            ],
+            "provisionalDifficulty": 8,
+            "estimatedDifficulty": 8,
+            "difficultyConfidence": 0.4,
+            "question_id": "987af53e-dbe9-49c8-adff-db5257177786",
+            "id": "987af53e-dbe9-49c8-adff-db5257177786",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": true,
+              "suggested_topic": "",
+              "suggested_difficulty": 8,
+              "canonical_suspected": false,
+              "confidence": 0.98,
+              "independent_answer": "-1/3",
+              "issues": [],
+              "reason": "分母等价于x^4，分子泰勒展开为-x^4/3+o(x^4)，极限为-1/3，与参考答案及解析一致。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "limit_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": null,
+              "content": "[\"limit\",\"泰勒展开与等价无穷小组合\",\"计算极限\",\"\\\\lim_{x\\\\to0}\\\\frac{\\\\ln(1+x^2)-x\\\\sin x}{x^2(e^{x^2}-1)}\",\"\",\"-\\\\frac{1}{3}\",\"分母 \\\\(x^2(e^{x^2}-1)\\\\sim x^4\\\\)。分子用泰勒：\\\\(\\\\ln(1+x^2)=x^2-\\\\frac{x^4}{2}+o(x^4)\\\\)，\\\\(x\\\\sin x=x^2-\\\\frac{x^4}{6}+o(x^4)\\\\)，故分子 \\\\(=-\\\\frac{x^4}{3}+o(x^4)\\\\)。极限为 \\\\(-\\\\frac{1}{3}\\\\)。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A"
+          }
+        ],
+        "attempts": 2,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-04",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 4
+      }
+    },
+    {
+      "index": 5,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "derivative",
+            "topic": null,
+            "targetDifficulty": 4,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-05",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 5
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "derivative",
+            "topic": "幂指函数与复合函数求导",
+            "difficulty": 4,
+            "selfEstimatedDifficulty": 4,
+            "difficultyDimensions": {
+              "recognition": 4,
+              "techniqueDepth": 4,
+              "calculationComplexity": 4,
+              "knowledgeCoupling": 4
+            },
+            "instruction": "求导数",
+            "expression": "y=(1+x^2)^{\\sin x}",
+            "answer": "(1+x^2)^{\\sin x}\\left(\\cos x\\ln(1+x^2)+\\frac{2x\\sin x}{1+x^2}\\right)",
+            "solution": "幂指函数先取对数：\\(\\ln y=\\sin x\\ln(1+x^2)\\)，两边对 \\(x\\) 求导得 \\(\\frac{y'}{y}=\\cos x\\ln(1+x^2)+\\frac{2x\\sin x}{1+x^2}\\)，再乘回 \\(y\\)。",
+            "keySteps": [
+              "取对数化为乘积形式",
+              "两边求导并解出 y'",
+              "代回 y 并整理"
+            ],
+            "provisionalDifficulty": 4,
+            "estimatedDifficulty": 4,
+            "difficultyConfidence": 0.4,
+            "question_id": "f6fc0653-02ee-4ad4-a4cd-d50d71b8a595",
+            "id": "f6fc0653-02ee-4ad4-a4cd-d50d71b8a595",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": true,
+              "suggested_topic": "",
+              "suggested_difficulty": 4,
+              "canonical_suspected": false,
+              "confidence": 0.98,
+              "independent_answer": "y'=(1+x^2)^{\\sin x}\\left(\\cos x\\ln(1+x^2)+\\frac{2x\\sin x}{1+x^2}\\right)",
+              "issues": [],
+              "reason": "对数求导法正确，定义域为全体实数，答案与解析一致。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "derivative_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": null,
+              "content": "[\"derivative\",\"幂指函数与复合函数求导\",\"求导数\",\"y=(1+x^2)^{\\\\sin x}\",\"\",\"(1+x^2)^{\\\\sin x}\\\\left(\\\\cos x\\\\ln(1+x^2)+\\\\frac{2x\\\\sin x}{1+x^2}\\\\right)\",\"幂指函数先取对数：\\\\(\\\\ln y=\\\\sin x\\\\ln(1+x^2)\\\\)，两边对 \\\\(x\\\\) 求导得 \\\\(\\\\frac{y'}{y}=\\\\cos x\\\\ln(1+x^2)+\\\\frac{2x\\\\sin x}{1+x^2}\\\\)，再乘回 \\\\(y\\\\)。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A"
+          }
+        ],
+        "attempts": 1,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-05",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 5
+      }
+    },
+    {
+      "index": 6,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "integral",
+            "topic": null,
+            "targetDifficulty": 12,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-06",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 6
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "integral",
+            "topic": "三角有理式与对称性、反常积分结合",
+            "difficulty": 12,
+            "selfEstimatedDifficulty": 12,
+            "difficultyDimensions": {
+              "recognition": 11,
+              "techniqueDepth": 12,
+              "calculationComplexity": 11,
+              "knowledgeCoupling": 12
+            },
+            "instruction": "计算反常积分",
+            "expression": "\\int_0^{\\pi/2}\\frac{dx}{1+\\tan^{2024}x}",
+            "answer": "\\frac{\\pi}{4}",
+            "solution": "令 \\(x=\\frac{\\pi}{2}-t\\)，利用 \\(\\tan(\\frac{\\pi}{2}-t)=\\cot t\\)，得 \\(I=\\int_0^{\\pi/2}\\frac{\\tan^{2024}t}{1+\\tan^{2024}t}\\,dt\\)。与原式相加得 \\(2I=\\int_0^{\\pi/2}1\\,dx=\\frac{\\pi}{2}\\)，故 \\(I=\\frac{\\pi}{4}\\)。",
+            "keySteps": [
+              "作换元 \\(x=\\frac{\\pi}{2}-t\\)，将积分化为 \\(\\int_0^{\\pi/2}\\frac{\\tan^{2024}t}{1+\\tan^{2024}t}\\,dt\\)",
+              "与原积分相加，被积函数和为 1",
+              "由 \\(2I=\\frac{\\pi}{2}\\) 得 \\(I=\\frac{\\pi}{4}\\)"
+            ],
+            "provisionalDifficulty": 12,
+            "estimatedDifficulty": 12,
+            "difficultyConfidence": 0.4,
+            "question_id": "0e495e40-a738-4058-9e38-7ab0096d6fba",
+            "id": "0e495e40-a738-4058-9e38-7ab0096d6fba",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": true,
+              "suggested_topic": "",
+              "suggested_difficulty": 6,
+              "canonical_suspected": false,
+              "confidence": 0.97,
+              "independent_answer": "\\frac{\\pi}{4}",
+              "issues": [],
+              "reason": "换元 x=π/2−t 后与原式相加得 2I=π/2，故 I=π/4，答案与解析均正确；但该题是经典对称性技巧题，难度远低于标注的 12。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "integral_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": null,
+              "content": "[\"integral\",\"三角有理式与对称性、反常积分结合\",\"计算反常积分\",\"\\\\int_0^{\\\\pi/2}\\\\frac{dx}{1+\\\\tan^{2024}x}\",\"\",\"\\\\frac{\\\\pi}{4}\",\"令 \\\\(x=\\\\frac{\\\\pi}{2}-t\\\\)，利用 \\\\(\\\\tan(\\\\frac{\\\\pi}{2}-t)=\\\\cot t\\\\)，得 \\\\(I=\\\\int_0^{\\\\pi/2}\\\\frac{\\\\tan^{2024}t}{1+\\\\tan^{2024}t}\\\\,dt\\\\)。与原式相加得 \\\\(2I=\\\\int_0^{\\\\pi/2}1\\\\,dx=\\\\frac{\\\\pi}{2}\\\\)，故 \\\\(I=\\\\frac{\\\\pi}{4}\\\\)。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A"
+          }
+        ],
+        "attempts": 1,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-06",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 6
+      }
+    },
+    {
+      "index": 7,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "limit",
+            "topic": null,
+            "targetDifficulty": 12,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-07",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 7
+      },
+      "response": {
+        "error": "Question quality gate rejected draft: SOLUTION_MISMATCH",
+        "code": "GENERATION_REJECTED",
+        "rejection_reasons": [
+          "SOLUTION_MISMATCH",
+          "SOLUTION_MISMATCH"
+        ],
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        }
+      }
+    },
+    {
+      "index": 8,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "derivative",
+            "topic": null,
+            "targetDifficulty": 8,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-08",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 8
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "derivative",
+            "topic": "幂指函数与对数求导",
+            "difficulty": 8,
+            "selfEstimatedDifficulty": 8,
+            "difficultyDimensions": {
+              "recognition": 8,
+              "techniqueDepth": 8,
+              "calculationComplexity": 7,
+              "knowledgeCoupling": 8
+            },
+            "instruction": "求导数",
+            "expression": "y=\\left(1+\\frac{1}{x}\\right)^{x}",
+            "answer": "\\left(1+\\frac{1}{x}\\right)^{x}\\left(\\ln\\left(1+\\frac{1}{x}\\right)-\\frac{1}{x+1}\\right)",
+            "solution": "取对数得 \\(\\ln y=x\\ln\\left(1+\\frac{1}{x}\\right)\\)，两边求导得 \\(\\frac{y'}{y}=\\ln\\left(1+\\frac{1}{x}\\right)-\\frac{1}{x+1}\\)，故 \\(y'=y\\left[\\ln\\left(1+\\frac{1}{x}\\right)-\\frac{1}{x+1}\\right]\\)。",
+            "keySteps": [
+              "取对数：\\(\\ln y=x\\ln\\left(1+\\frac{1}{x}\\right)\\)",
+              "两边求导：\\(\\frac{y'}{y}=\\ln\\left(1+\\frac{1}{x}\\right)-\\frac{1}{x+1}\\)",
+              "回代：\\(y'=\\left(1+\\frac{1}{x}\\right)^{x}\\left[\\ln\\left(1+\\frac{1}{x}\\right)-\\frac{1}{x+1}\\right]\\)"
+            ],
+            "provisionalDifficulty": 8,
+            "estimatedDifficulty": 8,
+            "difficultyConfidence": 0.4,
+            "question_id": "5b1ce2c9-e09b-4f2b-9ab3-6bc2d6fbf8f8",
+            "id": "5b1ce2c9-e09b-4f2b-9ab3-6bc2d6fbf8f8",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": true,
+              "suggested_topic": "",
+              "suggested_difficulty": 8,
+              "canonical_suspected": false,
+              "confidence": 0.97,
+              "independent_answer": "y'=(1+1/x)^x[ln(1+1/x)-1/(x+1)]",
+              "issues": [],
+              "reason": "对数求导正确，导数结果与解析一致；定义域为 x∈(-∞,-1)∪(0,+∞)，在该范围内推导成立。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "derivative_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": null,
+              "content": "[\"derivative\",\"幂指函数与对数求导\",\"求导数\",\"y=\\\\left(1+\\\\frac{1}{x}\\\\right)^{x}\",\"\",\"\\\\left(1+\\\\frac{1}{x}\\\\right)^{x}\\\\left(\\\\ln\\\\left(1+\\\\frac{1}{x}\\\\right)-\\\\frac{1}{x+1}\\\\right)\",\"取对数得 \\\\(\\\\ln y=x\\\\ln\\\\left(1+\\\\frac{1}{x}\\\\right)\\\\)，两边求导得 \\\\(\\\\frac{y'}{y}=\\\\ln\\\\left(1+\\\\frac{1}{x}\\\\right)-\\\\frac{1}{x+1}\\\\)，故 \\\\(y'=y\\\\left[\\\\ln\\\\left(1+\\\\frac{1}{x}\\\\right)-\\\\frac{1}{x+1}\\\\right]\\\\)。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A"
+          }
+        ],
+        "attempts": 1,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-08",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 8
+      }
+    },
+    {
+      "index": 9,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "integral",
+            "topic": null,
+            "targetDifficulty": 4,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-09",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 9
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "integral",
+            "topic": "有理函数积分",
+            "difficulty": 4,
+            "selfEstimatedDifficulty": 4,
+            "difficultyDimensions": {
+              "recognition": 4,
+              "techniqueDepth": 4,
+              "calculationComplexity": 4,
+              "knowledgeCoupling": 3
+            },
+            "instruction": "计算不定积分",
+            "expression": "\\int \\frac{x+1}{x^2+4x+5}\\,dx",
+            "answer": "\\frac{1}{2}\\ln(x^2+4x+5)-\\arctan(x+2)+C",
+            "solution": "分母配方为 \\((x+2)^2+1\\)，分子拆为 \\(\\frac{1}{2}(2x+4)-1\\)，分别积分得对数项与反正切项。",
+            "keySteps": [
+              "分母配方：\\(x^2+4x+5=(x+2)^2+1\\)",
+              "拆分分子：\\(x+1=\\frac{1}{2}(2x+4)-1\\)",
+              "积分得 \\(\\frac{1}{2}\\ln(x^2+4x+5)-\\arctan(x+2)+C\\)"
+            ],
+            "provisionalDifficulty": 4,
+            "estimatedDifficulty": 4,
+            "difficultyConfidence": 0.4,
+            "question_id": "c633e77c-5e3d-4bbb-ae92-fc09dbe7ba5f",
+            "id": "c633e77c-5e3d-4bbb-ae92-fc09dbe7ba5f",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": true,
+              "suggested_topic": "",
+              "suggested_difficulty": 4,
+              "canonical_suspected": false,
+              "confidence": 0.98,
+              "independent_answer": "\\frac{1}{2}\\ln(x^2+4x+5)-\\arctan(x+2)+C",
+              "issues": [],
+              "reason": "分母配方为 (x+2)^2+1，分子拆为 1/2(2x+4)-1，积分得 1/2 ln(x^2+4x+5) - arctan(x+2)+C，与参考答案一致。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "integral_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": null,
+              "content": "[\"integral\",\"有理函数积分\",\"计算不定积分\",\"\\\\int \\\\frac{x+1}{x^2+4x+5}\\\\,dx\",\"\",\"\\\\frac{1}{2}\\\\ln(x^2+4x+5)-\\\\arctan(x+2)+C\",\"分母配方为 \\\\((x+2)^2+1\\\\)，分子拆为 \\\\(\\\\frac{1}{2}(2x+4)-1\\\\)，分别积分得对数项与反正切项。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A"
+          }
+        ],
+        "attempts": 1,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-09",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 9
+      }
+    },
+    {
+      "index": 10,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "limit",
+            "topic": null,
+            "targetDifficulty": 4,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-10",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 10
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "limit",
+            "topic": "等价无穷小与对数展开",
+            "difficulty": 4,
+            "selfEstimatedDifficulty": 4,
+            "difficultyDimensions": {
+              "recognition": 4,
+              "techniqueDepth": 4,
+              "calculationComplexity": 3,
+              "knowledgeCoupling": 4
+            },
+            "instruction": "计算极限",
+            "expression": "\\lim_{x\\to0}\\frac{\\ln(1+x^2)}{1-\\cos x}",
+            "answer": "2",
+            "solution": "当 \\(x\\to0\\) 时，\\(\\ln(1+x^2)\\sim x^2\\)，且 \\(1-\\cos x\\sim \\frac{x^2}{2}\\)，故原极限为 \\(\\frac{x^2}{x^2/2}=2\\)。",
+            "keySteps": [
+              "利用 \\(\\ln(1+x^2)\\sim x^2\\)",
+              "利用 \\(1-\\cos x\\sim \\frac{x^2}{2}\\)",
+              "相除得极限为 2"
+            ],
+            "provisionalDifficulty": 4,
+            "estimatedDifficulty": 4,
+            "difficultyConfidence": 0.4,
+            "question_id": "229ce05b-13a5-4939-beef-f726051d0b07",
+            "id": "229ce05b-13a5-4939-beef-f726051d0b07",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": true,
+              "suggested_topic": "",
+              "suggested_difficulty": 4,
+              "canonical_suspected": false,
+              "confidence": 0.98,
+              "independent_answer": "2",
+              "issues": [],
+              "reason": "当 x→0 时，ln(1+x²)~x²，1-cos x~x²/2，因此极限为 x²/(x²/2)=2，与参考答案和解析一致。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "limit_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": null,
+              "content": "[\"limit\",\"等价无穷小与对数展开\",\"计算极限\",\"\\\\lim_{x\\\\to0}\\\\frac{\\\\ln(1+x^2)}{1-\\\\cos x}\",\"\",\"2\",\"当 \\\\(x\\\\to0\\\\) 时，\\\\(\\\\ln(1+x^2)\\\\sim x^2\\\\)，且 \\\\(1-\\\\cos x\\\\sim \\\\frac{x^2}{2}\\\\)，故原极限为 \\\\(\\\\frac{x^2}{x^2/2}=2\\\\)。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A"
+          }
+        ],
+        "attempts": 1,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-10",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 10
+      }
+    },
+    {
+      "index": 11,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "derivative",
+            "topic": "复合函数求导",
+            "targetDifficulty": 12,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-11",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 11
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "derivative",
+            "topic": "幂指函数与对数求导",
+            "difficulty": 12,
+            "selfEstimatedDifficulty": 12,
+            "difficultyDimensions": {
+              "recognition": 12,
+              "techniqueDepth": 12,
+              "calculationComplexity": 11,
+              "knowledgeCoupling": 12
+            },
+            "instruction": "求导",
+            "expression": "y=\\left(\\frac{x}{1+x}\\right)^{x}",
+            "answer": "\\left(\\frac{x}{1+x}\\right)^{x}\\left(\\ln\\frac{x}{1+x}+\\frac{1}{1+x}\\right)",
+            "solution": "取对数 \\(\\ln y=x\\ln\\frac{x}{1+x}\\)，两边对 \\(x\\) 求导得 \\(\\frac{y'}{y}=\\ln\\frac{x}{1+x}+\\frac{1}{1+x}\\)，故 \\(y'=y\\left(\\ln\\frac{x}{1+x}+\\frac{1}{1+x}\\right)\\)。",
+            "keySteps": [
+              "取对数化为乘积形式",
+              "两边求导并解出 y'",
+              "代回原函数"
+            ],
+            "provisionalDifficulty": 12,
+            "estimatedDifficulty": 12,
+            "difficultyConfidence": 0.4,
+            "question_id": "a0b8056d-83ca-43f9-9221-019ed79cf528",
+            "id": "a0b8056d-83ca-43f9-9221-019ed79cf528",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": true,
+              "suggested_topic": "",
+              "suggested_difficulty": 12,
+              "canonical_suspected": false,
+              "confidence": 0.97,
+              "independent_answer": "y'=(x/(1+x))^x·[ln(x/(1+x))+1/(1+x)]",
+              "issues": [],
+              "reason": "对数求导法正确：ln y=x[ln x−ln(1+x)]，求导得 y'/y=ln(x/(1+x))+1/(1+x)，与参考答案一致；定义域 x>0 下成立。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "derivative_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": null,
+              "content": "[\"derivative\",\"幂指函数与对数求导\",\"求导\",\"y=\\\\left(\\\\frac{x}{1+x}\\\\right)^{x}\",\"\",\"\\\\left(\\\\frac{x}{1+x}\\\\right)^{x}\\\\left(\\\\ln\\\\frac{x}{1+x}+\\\\frac{1}{1+x}\\\\right)\",\"取对数 \\\\(\\\\ln y=x\\\\ln\\\\frac{x}{1+x}\\\\)，两边对 \\\\(x\\\\) 求导得 \\\\(\\\\frac{y'}{y}=\\\\ln\\\\frac{x}{1+x}+\\\\frac{1}{1+x}\\\\)，故 \\\\(y'=y\\\\left(\\\\ln\\\\frac{x}{1+x}+\\\\frac{1}{1+x}\\\\right)\\\\)。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A"
+          }
+        ],
+        "attempts": 2,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-11",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 11
+      }
+    },
+    {
+      "index": 12,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "integral",
+            "topic": "分部积分",
+            "targetDifficulty": 8,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-12",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 12
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "integral",
+            "topic": "分部积分",
+            "difficulty": 8,
+            "selfEstimatedDifficulty": 8,
+            "difficultyDimensions": {
+              "recognition": 8,
+              "techniqueDepth": 8,
+              "calculationComplexity": 7,
+              "knowledgeCoupling": 8
+            },
+            "instruction": "计算不定积分",
+            "expression": "\\int e^{2x}\\sin 3x\\,dx",
+            "answer": "\\frac{e^{2x}}{13}(2\\sin 3x-3\\cos 3x)+C",
+            "solution": "令 \\(I=\\int e^{2x}\\sin 3x\\,dx\\)，两次分部积分得到循环式 \\(I=\\frac{e^{2x}}{13}(2\\sin 3x-3\\cos 3x)+C\\)。",
+            "keySteps": [
+              "第一次分部：取 \\(u=\\sin 3x,\\ dv=e^{2x}dx\\)",
+              "第二次分部后移项解出 \\(I\\)",
+              "整理系数并加常数 \\(C\\)"
+            ],
+            "provisionalDifficulty": 8,
+            "estimatedDifficulty": 8,
+            "difficultyConfidence": 0.4,
+            "question_id": "0b7adf38-c14e-4edd-9468-e5f177753ffb",
+            "id": "0b7adf38-c14e-4edd-9468-e5f177753ffb",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": true,
+              "suggested_topic": "",
+              "suggested_difficulty": 8,
+              "canonical_suspected": false,
+              "confidence": 0.97,
+              "independent_answer": "\\frac{e^{2x}}{13}(2\\sin 3x-3\\cos 3x)+C",
+              "issues": [],
+              "reason": "两次分部积分循环求解，结果与参考答案一致，解析正确。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "integral_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": null,
+              "content": "[\"integral\",\"分部积分\",\"计算不定积分\",\"\\\\int e^{2x}\\\\sin 3x\\\\,dx\",\"\",\"\\\\frac{e^{2x}}{13}(2\\\\sin 3x-3\\\\cos 3x)+C\",\"令 \\\\(I=\\\\int e^{2x}\\\\sin 3x\\\\,dx\\\\)，两次分部积分得到循环式 \\\\(I=\\\\frac{e^{2x}}{13}(2\\\\sin 3x-3\\\\cos 3x)+C\\\\)。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A"
+          }
+        ],
+        "attempts": 2,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-12",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 12
+      }
+    },
+    {
+      "index": 13,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "limit",
+            "topic": "泰勒展开求极限",
+            "targetDifficulty": 8,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-13",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 13
+      },
+      "response": {
+        "error": "Question quality gate rejected draft: ANSWER_FAILS_VERIFICATION",
+        "code": "GENERATION_REJECTED",
+        "rejection_reasons": [
+          "ANSWER_FAILS_VERIFICATION",
+          "ANSWER_FAILS_VERIFICATION"
+        ],
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        }
+      }
+    },
+    {
+      "index": 14,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "derivative",
+            "topic": "对数求导",
+            "targetDifficulty": 8,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-14",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 14
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "derivative",
+            "topic": "对数求导",
+            "difficulty": 8,
+            "selfEstimatedDifficulty": 8,
+            "difficultyDimensions": {
+              "recognition": 8,
+              "techniqueDepth": 8,
+              "calculationComplexity": 7,
+              "knowledgeCoupling": 8
+            },
+            "instruction": "求导",
+            "expression": "y=\\frac{(x+1)^{2x}\\sqrt{x^2+1}}{(x^2+2)^x}",
+            "answer": "\\frac{(x+1)^{2x}\\sqrt{x^2+1}}{(x^2+2)^x}\\left[2\\ln(x+1)+\\frac{2x}{x+1}+\\frac{x}{x^2+1}-\\ln(x^2+2)-\\frac{2x^2}{x^2+2}\\right]",
+            "solution": "取对数得 \\(\\ln y=2x\\ln(x+1)+\\frac12\\ln(x^2+1)-x\\ln(x^2+2)\\)，两边对 \\(x\\) 求导，再乘以 \\(y\\) 即得。",
+            "keySteps": [
+              "两边取对数化简为和式",
+              "逐项求导并整理",
+              "乘以原函数得到结果"
+            ],
+            "provisionalDifficulty": 8,
+            "estimatedDifficulty": 8,
+            "difficultyConfidence": 0.4,
+            "question_id": "dd743040-35f3-46a6-8ab6-9383683bc5d9",
+            "id": "dd743040-35f3-46a6-8ab6-9383683bc5d9",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": true,
+              "suggested_topic": "",
+              "suggested_difficulty": 8,
+              "canonical_suspected": false,
+              "confidence": 0.97,
+              "independent_answer": "y'=\\frac{(x+1)^{2x}\\sqrt{x^2+1}}{(x^2+2)^x}\\left[2\\ln(x+1)+\\frac{2x}{x+1}+\\frac{x}{x^2+1}-\\ln(x^2+2)-\\frac{2x^2}{x^2+2}\\right]",
+              "issues": [],
+              "reason": "对数求导各项导数正确，结果与参考答案一致；定义域要求x+1>0，题目默认成立。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "derivative_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": null,
+              "content": "[\"derivative\",\"对数求导\",\"求导\",\"y=\\\\frac{(x+1)^{2x}\\\\sqrt{x^2+1}}{(x^2+2)^x}\",\"\",\"\\\\frac{(x+1)^{2x}\\\\sqrt{x^2+1}}{(x^2+2)^x}\\\\left[2\\\\ln(x+1)+\\\\frac{2x}{x+1}+\\\\frac{x}{x^2+1}-\\\\ln(x^2+2)-\\\\frac{2x^2}{x^2+2}\\\\right]\",\"取对数得 \\\\(\\\\ln y=2x\\\\ln(x+1)+\\\\frac12\\\\ln(x^2+1)-x\\\\ln(x^2+2)\\\\)，两边对 \\\\(x\\\\) 求导，再乘以 \\\\(y\\\\) 即得。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A"
+          }
+        ],
+        "attempts": 2,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-14",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 14
+      }
+    },
+    {
+      "index": 15,
+      "request": {
+        "action": "generate",
+        "count": 1,
+        "plans": [
+          {
+            "module": "integral",
+            "topic": null,
+            "targetDifficulty": 12,
+            "purpose": "daily",
+            "zone": "target"
+          }
+        ],
+        "difficultyModelVersion": "v0-provisional",
+        "avoidPrompts": [],
+        "request_id": "reliability-audit-20261021-15",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 15
+      },
+      "response": {
+        "difficultyModelVersion": "v0-provisional",
+        "questions": [
+          {
+            "module": "integral",
+            "topic": "三角有理式与万能代换结合对称性",
+            "difficulty": 12,
+            "selfEstimatedDifficulty": 12,
+            "difficultyDimensions": {
+              "recognition": 12,
+              "techniqueDepth": 12,
+              "calculationComplexity": 11,
+              "knowledgeCoupling": 12
+            },
+            "instruction": "计算定积分",
+            "expression": "\\int_0^{\\pi/2}\\frac{dx}{1+\\tan^{2024}x}",
+            "answer": "\\frac{\\pi}{4}",
+            "solution": "令 \\(x=\\frac{\\pi}{2}-t\\)，则积分化为 \\(\\int_0^{\\pi/2}\\frac{\\tan^{2024}t}{1+\\tan^{2024}t}\\,dt\\)。与原式相加得 \\(2I=\\int_0^{\\pi/2}1\\,dx=\\frac{\\pi}{2}\\)，故 \\(I=\\frac{\\pi}{4}\\)。",
+            "keySteps": [
+              "作代换 \\(x=\\frac{\\pi}{2}-t\\) 并利用 \\(\\tan(\\frac{\\pi}{2}-t)=\\cot t\\)",
+              "将变换后的积分与原积分相加消去复杂项",
+              "由 \\(2I=\\frac{\\pi}{2}\\) 得 \\(I=\\frac{\\pi}{4}\\)"
+            ],
+            "provisionalDifficulty": 12,
+            "estimatedDifficulty": 12,
+            "difficultyConfidence": 0.4,
+            "question_id": "d6ee2e5d-adf4-4d92-9358-14b2353843b2",
+            "id": "d6ee2e5d-adf4-4d92-9358-14b2353843b2",
+            "model": "deepseek-v4-flash",
+            "generator_prompt_version": "generator-v2",
+            "review_prompt_version": "reviewer-v2",
+            "judge_prompt_version": "judge-v2",
+            "math_engine_version": "quality-v2",
+            "status": "approved",
+            "verification": {
+              "question_valid": true,
+              "answer_correct": true,
+              "solution_correct": true,
+              "answer_solution_consistent": true,
+              "topic_match": true,
+              "difficulty_reasonable": false,
+              "suggested_topic": "定积分对称性（区间再现公式）",
+              "suggested_difficulty": 5,
+              "canonical_suspected": false,
+              "confidence": 0.97,
+              "independent_answer": "\\frac{\\pi}{4}",
+              "issues": [],
+              "reason": "令 x=π/2−t 得 I=∫tan^{2024}t/(1+tan^{2024}t)dt，与原式相加得 2I=π/2，故 I=π/4，答案与解析均正确；但该题本质是区间再现对称性技巧，计算量小，难度远低于标注的 12。",
+              "version": "quality-v2",
+              "pipeline": {
+                "protocol": 2,
+                "generator": "generator-v2",
+                "reviewer": "reviewer-v2",
+                "judge": "judge-v2",
+                "math_engine": "quality-v2"
+              },
+              "status": "approved",
+              "state": "VERIFIED",
+              "tier": "A",
+              "shape": "integral_ok",
+              "gate": "hard",
+              "hard_fields": {
+                "question_valid": true,
+                "answer_correct": true,
+                "solution_correct": true,
+                "answer_solution_consistent": true
+              },
+              "reviewer_notes": [],
+              "metadata": {
+                "difficulty": 5,
+                "reason_difficulty": "reviewer judged difficulty_reasonable=false"
+              },
+              "content": "[\"integral\",\"三角有理式与万能代换结合对称性\",\"计算定积分\",\"\\\\int_0^{\\\\pi/2}\\\\frac{dx}{1+\\\\tan^{2024}x}\",\"\",\"\\\\frac{\\\\pi}{4}\",\"令 \\\\(x=\\\\frac{\\\\pi}{2}-t\\\\)，则积分化为 \\\\(\\\\int_0^{\\\\pi/2}\\\\frac{\\\\tan^{2024}t}{1+\\\\tan^{2024}t}\\\\,dt\\\\)。与原式相加得 \\\\(2I=\\\\int_0^{\\\\pi/2}1\\\\,dx=\\\\frac{\\\\pi}{2}\\\\)，故 \\\\(I=\\\\frac{\\\\pi}{4}\\\\)。\"]"
+            },
+            "verification_state": "VERIFIED",
+            "verification_tier": "A",
+            "displayDifficulty": 5,
+            "metadataCorrection": {
+              "difficulty": 5,
+              "reason_difficulty": "reviewer judged difficulty_reasonable=false"
+            }
+          }
+        ],
+        "attempts": 2,
+        "gate_state": "VERIFIED",
+        "tier": "A",
+        "gate_policy": "strict-tier-b",
+        "versions": {
+          "protocol": 2,
+          "generator": "generator-v2",
+          "reviewer": "reviewer-v2",
+          "judge": "judge-v2",
+          "math_engine": "quality-v2"
+        },
+        "request_id": "reliability-audit-20261021-15",
+        "session_id": "reliability-audit-isolated-20261021",
+        "question_sequence": 15
+      }
+    }
+  ]
+}

@@ -16,6 +16,7 @@
     "smoke:compare": "node tools/smoke/compare.mjs",
     "smoke:matrix": "node -e \"import('./tools/smoke/matrix.mjs').then(m=>console.log(m.matrixSize()+' questions'))\"",
     "probe:local": "node tools/smoke/judge-probe-local.mjs",
+    "net:stability": "node tools/net-stability.mjs",
     "sync:backend": "node tools/sync-backend.mjs",
     "sync": "npm run sync:engine && npm run sync:backend"
   },

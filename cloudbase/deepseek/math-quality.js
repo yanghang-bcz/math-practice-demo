@@ -471,7 +471,7 @@
         if (k === digitStart) continue;
 
         const digits = t.slice(digitStart, k);
-        if (!/^[2-9]\d*$/.test(digits)) continue;
+        if (!/^\d+$/.test(digits) || Number(digits) < 2) continue;
 
         while (t[k] === ' ') k++;
         if (paren) {
@@ -565,6 +565,13 @@
 
   function toInfix(src, varName) {
     let t = String(src ?? '');
+    // Only these upright constants are semantics-preserving. Unknown commands remain invalid.
+    t = t.replace(/\\mathrm\s*\{e\}/g, 'e');
+    t = t.replace(/\\log\s*_\s*(?:\{(2|10)\}|(2|10))\s*(?:\\left\s*)?(?:\(([^()]*)\)(?:\\right)?|\{([^{}]*)\}|(x)(?!\s*\^))/g,
+      (_, a, b, c, d, e) => '(\\ln(' + (c || d || e) + ')/\\ln(' + (a || b) + '))');
+    // Subscripts have mathematical meaning; never erase them into another function.
+    if (t.includes('_')) return '';
+
 
     // A LaTeX command glues to whatever precedes it: "2x\cos(x^2)" must become
     // "2x*cos(x^2)", otherwise the tokenizer reads "xcos" as one identifier.
@@ -610,8 +617,6 @@
     t = expandFrac(t);
     t = expandSqrt(t);
     t = t.replace(/\^\{([^{}]*)\}/g, '^($1)');
-    t = t.replace(/_\{[^{}]*\}/g, '');
-    t = t.replace(/_./g, '');
     t = t.replace(/[{}]/g, '');
     t = t.replace(/\\/g, '');
     t = t.replace(/[\u2212\u2013\u2014]/g, '-');
@@ -632,7 +637,7 @@
   /* Split "y = f(x)" into its body. Returns implicit:true when the equation is
      not a plain definition — e.g. "x^2+xy+y^2=1" must NOT be treated as f(x)=1. */
   function splitDefinition(src) {
-    const t = String(src ?? '').trim();
+    const t = String(src ?? '').replace(/\\(?:left|right)/g, '').trim();
     const eq = t.indexOf('=');
     if (eq < 0) return { body: t, implicit: false };
 
@@ -884,12 +889,8 @@
       const fn = compile(infix);
       if (!fn) return null;
 
-      let evaluated = false;
-      for (const probe of [0.37, 1.13, -0.61]) {
-        if (safeEval(fn, probe) !== null) { evaluated = true; break; }
-      }
+      return fn; // Syntax and existence of valid domain samples are separate checks.
 
-      return evaluated ? fn : null;
     } catch (error) {
       return null;
     }
@@ -916,7 +917,7 @@
     if (!ds.length) return null;
     if (ds.length === 1) return ds[0];
 
-    const v = 2 * ds[1] - ds[0];
+    const v = (4 * ds[1] - ds[0]) / 3;
     return Number.isFinite(v) ? v : null;
   }
 
@@ -1026,7 +1027,7 @@
   }
 
   function extractIntegral(expr) {
-    const s = String(expr ?? '');
+    const s = String(expr ?? '').replace(/\\mathrm\s*\{d\}/g, 'd');
     const idx = s.indexOf('\\int');
     if (idx < 0) return null;
 
@@ -1434,7 +1435,13 @@
     return 'uncertain';
   }
 
+  // Bounded domain search: retain all original samples and add small/shifted intervals.
+  const DOMAIN_POINTS = [...new Set([...SAMPLE_POINTS,
+    ...[-10, -4, -1, 0, 1, 3, 4, 10].flatMap(c =>
+      [-0.43, -0.21, -0.07, 0.09, 0.23, 0.41, 0.67].map(d => c + d))])];
+
   function verifyDerivative(question, candidate) {
+    if (/在|处|x\s*=|[fy]'\s*\(\s*[+-]?\d/.test(question.instruction || '')) return 'uncertain';
     const definition = splitDefinition(question.expression || question.prompt || '');
     if (definition.implicit) return 'uncertain'; // e.g. x^2+xy+y^2=1 — not f(x)=
 
@@ -1452,7 +1459,8 @@
     let checked = 0;
     let bad = 0;
 
-    for (const x of SAMPLE_POINTS) {
+    for (const [sampleIndex, x] of DOMAIN_POINTS.entries()) {
+      if (sampleIndex >= SAMPLE_POINTS.length && checked >= 4) break;
       const d = numericDerivativeOfOrder(f, x, order);
       if (d === null) continue;
       const gv = safeEval(g, x);
@@ -1499,7 +1507,8 @@
     let checked = 0;
     let bad = 0;
 
-    for (const x of SAMPLE_POINTS) {
+    for (const [sampleIndex, x] of DOMAIN_POINTS.entries()) {
+      if (sampleIndex >= SAMPLE_POINTS.length && checked >= 4) break;
       const fx = safeEval(f, x);
       if (fx === null) continue;
       const d = numericDerivative(F, x);
@@ -1892,7 +1901,7 @@
     if (atom(q.answer)?.kind === 'invalid') out.push(CODES.ANSWER_INVALID);
 
     const matches = [...(q.solution || '').matchAll(
-      /(?:最终答案|答案|极限|结果)(?:为|是|等于|[:：])\s*(\\\([^\n]+?\\\)|[+\-]?\d+(?:\.\d+)?(?:\/\d+)?)(?=[。；，\s]|$)/g
+      /(?:最终答案|答案|原极限|最终结果|结果)(?:为|是|等于|[:：])\s*(\\\([^\n]+?\\\)|[+\-]?\d+(?:\.\d+)?(?:\/\d+)?)(?=[。；，\s]|$)/g
     )];
 
     if (matches.some(m => compare(m[1], q.answer) === 'not_equivalent')) {

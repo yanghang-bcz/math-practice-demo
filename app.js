@@ -234,7 +234,8 @@
   ) {
     requestCounter += 1;
 
-    return `${prefix}-${Date.now().toString(36)}-${requestCounter.toString(36)}`;
+    const nonce = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+    return `${prefix}-${Date.now().toString(36)}-${requestCounter.toString(36)}-${nonce}`;
   }
 
 
@@ -388,6 +389,12 @@
 
       message:
         record.message || null,
+
+      code: record.code || null,
+      reason_code: record.reason_code || null,
+      stage: record.stage || null,
+      origin: record.origin || null,
+      bank_id: record.bank_id || null,
 
       // ── 每题 ──
       question_id:
@@ -1201,6 +1208,9 @@
           ? parsed.history
           : [],
 
+      recentDisplayedFallbackIds: Array.isArray(parsed.recentDisplayedFallbackIds)
+        ? parsed.recentDisplayedFallbackIds.filter(id => typeof id === 'string').slice(-40) : [],
+
       checkins:
         Array.isArray(
           parsed.checkins
@@ -1896,55 +1906,26 @@
     'https://calcdaily-d5g2titwue91551fb-1482769901.ap-shanghai.app.tcloudbase.com/api/deepseek';
 
 
-  /* ── 超时 / 重试 / 退避（Task 5F）──────────────────────────────
-
-     旧的预算是 generate 190 秒、其余 50 秒，而且**一次都不重试**。
-     这套预算有两头都不对：
-
-       1. 190 秒是照着服务端「两次生成 + 两次复核」的最坏情况配的。
-          真走到那一步，用户对着「正在准备题目…」等三分多钟 —— 而这段时间里
-          备用题库本来可以立刻给出一道已校验的题。宁可少一道动态题，
-          也不要让用户干等。
-       2. 一次都不重试，意味着一次握手抖动（DNS、连接被重置、CDN 502）
-          就直接掉进备用题 —— 明明再试一次就成功了。
-
-     新预算按「服务端一次往返的真实耗时」定，而不是照着它的最坏情况：
-
-       generate  60s      服务端典型 15~35s（含一次复核失败重来）
-       judge     22s      服务端判题预算已收到 20s
-       evaluate  25s      难度标定，失败不影响出题
-
-     重试策略刻意不对称：
-       · 判题：任何可重试失败都重试 1 次（含超时）—— 预算小，值得再试
-       · 出题：超时**不**重试。超时说明服务已经吃力，再等一个满额超时
-         只会把等待翻倍；这一路的正确处置是立刻退到备用题库。
-         连接类失败（握手抖动、5xx、429）才重试，这类失败几乎不耗时。
-     ========================================================= */
+  /* Request budgets align with the 35s platform cap. The server stops at 30s;
+     generate allows 33s per HTTP attempt and 34s overall. Recovery remains inside the server; generation HTTP requests are never automatically resubmitted.
+     A timeout or quality failure never starts a second HTTP generation. */
 
   const API_TIMEOUTS = {
-    generate: 60000,
+    generate: 33000,
     judge: 22000,
     evaluate: 25000
   };
 
   const API_RETRY = {
-    generate: { attempts: 2 },
+    generate: { attempts: 1 },
     judge: { attempts: 2 },
     evaluate: { attempts: 1 }
   };
 
-  /* 整体预算（wall-clock deadline）。每次超时都只是「这一次」的上限，
-     真正决定用户等多久的是「这一次 + 退避 + 下一次」。把总预算钉死，
-     才对得上「不再出现 180~190 秒等待」这条要求：
-
-       generate  90s   最坏 = 一次快速失败 + 退避 + 一次满额超时
-       judge     45s   最坏 = 两次 22s
-       evaluate  25s   标定失败不影响出题，没有必要等更久
-
-     超预算时不再重试，直接把这次失败抛出去 —— 由上层决定退到备用题库。
-     让用户为「再试一次」多等一分钟，比直接给一道已校验的备用题糟得多。 */
+  /* Wall-clock budgets include retry backoff and body reads. Each HTTP attempt sends
+     its remaining budget to the server, with 2s reserved for the return trip. */
   const API_BUDGETS = {
-    generate: 90000,
+    generate: 34000,
     judge: 45000,
     evaluate: 25000
   };
@@ -2001,6 +1982,14 @@
     const judge =
       action === 'judge';
 
+    if (error?.code === 'GENERATE_EMPTY') return FAILURE_KINDS.GENERATE_EMPTY;
+    if (error?.code === 'CLIENT_PROTOCOL_ERROR') return judge ? FAILURE_KINDS.JUDGE_PROTOCOL : FAILURE_KINDS.GENERATE_PROTOCOL;
+    if (error?.code === 'UPSTREAM_TIMEOUT') return judge ? FAILURE_KINDS.JUDGE_TIMEOUT : FAILURE_KINDS.GENERATE_TIMEOUT;
+    if (error?.code === 'UPSTREAM_UNREACHABLE') return judge ? FAILURE_KINDS.JUDGE_NETWORK : FAILURE_KINDS.GENERATE_NETWORK;
+    if (/^(GENERATION_UNVERIFIED|UNVERIFIED_)/.test(error?.code || '')) return FAILURE_KINDS.GENERATE_UNVERIFIED;
+    if (/^(GENERATION_REJECTED|CANONICAL_|ANSWER_|SOLUTION_)/.test(error?.code || '')) return FAILURE_KINDS.GENERATE_REJECTED;
+    if (/PROTOCOL|VERIFICATION_STALE|EMPTY_CONTENT|FORMAT/.test(error?.code || '')) return judge ? FAILURE_KINDS.JUDGE_PROTOCOL : FAILURE_KINDS.GENERATE_PROTOCOL;
+
     if (error?.httpStatus) {
       return judge
         ? FAILURE_KINDS.JUDGE_HTTP
@@ -2035,6 +2024,10 @@
     action,
     error
   ) {
+    // Business failures stay business failures, including old servers returning HTTP 500.
+    if (error?.retryable === false || /^(GENERATION_|UNVERIFIED_|CANONICAL_|ANSWER_|SOLUTION_)/.test(error?.code || '')) return false;
+    if (error?.code === 'UPSTREAM_TIMEOUT') return false;
+    if (error?.retryable === true) return true;
     const status =
       Number(error?.httpStatus);
 
@@ -2077,7 +2070,8 @@
       API_TIMEOUTS[action] ||
       25000;
 
-    const attempts =
+    // A lost response can follow a billable accepted upstream call. Never resubmit generation automatically.
+    const attempts = action === 'generate' ? 1 :
       Math.max(
         1,
         Number(options.attempts) ||
@@ -2110,7 +2104,7 @@
     ) {
       if (attempt > 0) {
         const delay =
-          retryDelay(attempt - 1);
+          Math.max(retryDelay(attempt - 1), lastError?.retryAfterMs || 0);
 
         if (Date.now() + delay + 1000 > deadline) {
           diagLog({
@@ -2172,6 +2166,8 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 action,
+                delivery_contract: 'v1.2-safe-merge',
+                budget_ms: Math.min(30000, Math.max(1, remaining - 2000)),
                 request_id: requestId,
                 session_id: payload.session_id ?? null,
                 question_sequence: payload.question_sequence ?? null,
@@ -2181,14 +2177,18 @@
             }
           );
 
-        const data =
-          await response
-            .json()
-            .catch(
-              () => null
-            );
+        let data;
+        try { data = await response.json(); }
+        catch (error) {
+          if (error?.name !== 'SyntaxError') throw error;
+          if (response.ok) throw Object.assign(new Error('AI 返回体不是 JSON'), { code: 'CLIENT_PROTOCOL_ERROR' });
+          data = null; // Preserve an HTTP gateway failure even when it returns HTML.
+        }
+        if (data?.request_id && data.request_id !== requestId) {
+          throw Object.assign(new Error('响应请求身份不匹配'), { code: 'CLIENT_PROTOCOL_ERROR' });
+        }
 
-        if (!response.ok) {
+        if (!response.ok || data?.ok === false) {
           const error = new Error(
             data?.error ||
             `AI 请求失败 (${response.status})`
@@ -2200,6 +2200,11 @@
           error.code =
             data?.code || null;
 
+          error.reasonCode = data?.reason_code || null;
+          error.retryable = data?.retryable;
+          error.retryAfterMs = Number(data?.retry_after_ms) || Number(response.headers?.get('retry-after')) * 1000 || 0;
+          error.stage = data?.stage;
+          error.reportServiceError = data?.report_service_error;
           throw error;
         }
 
@@ -2252,6 +2257,7 @@
           action,
           event: 'http_attempt',
           kind: apiFailureKind(action, error),
+          code: error?.code || null, reason_code: error?.reasonCode || null, stage: error?.stage || null,
           message: error?.message || String(error),
           request_id: requestId,
           attempt_id: attemptId,
@@ -2584,6 +2590,7 @@
   function markApiRequestFailure(
     error
   ) {
+    if (error?.reportServiceError === false || /^(GENERATION_|UNVERIFIED_|CANONICAL_|ANSWER_|SOLUTION_)/.test(error?.code || '')) return;
     apiLastError =
       shortApiError(
         error
@@ -4529,7 +4536,7 @@
   function recentFallbackIds(
     limit = 20
   ) {
-    const out = [];
+    const out = [...(state.recentDisplayedFallbackIds || [])];
 
     for (const item of state.history.slice(-limit)) {
       const key =
@@ -5106,7 +5113,7 @@
       }
 
 
-      markApiRequestSuccess();
+      if (!meta.background) markApiRequestSuccess();
 
 
       const q =
@@ -5293,6 +5300,7 @@
         level: 'info',
         action: 'generate',
         event: 'question_ready',
+        origin: meta.background ? (requestId.startsWith('warmup-') ? 'warmup' : 'prefetch') : 'foreground',
         message: 'ai',
         question_id: question.question_id || question.id || null,
         module: question.module || null,
@@ -5320,6 +5328,7 @@
       }
 
 
+      question.deliveryRequestId = requestId;
       return question;
 
     } catch (error) {
@@ -5328,29 +5337,13 @@
       );
 
 
-      markApiRequestFailure(
-        error
-      );
-
-
-      /* 失败分类：同一条「出题失败」在日志里必须能分辨是超时、网络、
-         协议不匹配、还是题目被闸门拒了 —— 这四件事的处置完全不同。 */
-      const kind =
-        error?.code === 'CLIENT_PROTOCOL_ERROR'
-          ? FAILURE_KINDS.GENERATE_PROTOCOL
-          : error?.code === 'GENERATE_EMPTY'
-            ? FAILURE_KINDS.GENERATE_EMPTY
-            : isUnverifiedCode(error?.code)
-              ? FAILURE_KINDS.GENERATE_UNVERIFIED
-              : error?.code
-                ? FAILURE_KINDS.GENERATE_REJECTED
-                : apiFailureKind('generate', error);
+      const kind = apiFailureKind('generate', error);
 
       diagLog({
         level: 'error',
         action: 'generate',
         event: 'question_failed',
-        kind,
+        kind, code: error?.code || null, reason_code: error?.reasonCode || null, stage: error?.stage || null,
         message: error?.message || String(error),
         module: plan?.module || null,
         request_id: requestId,
@@ -5358,38 +5351,18 @@
         question_sequence: sequence,
         duration_ms: Date.now() - startedAt,
         http_status: error?.httpStatus ?? null,
-        outcome: 'fallback',
-        fallback: true
+        outcome: 'failed',
+        fallback: false
       });
 
 
-      toast(
-        `AI 本次出题失败，已使用备用题：${shortApiError(error)}`
-      );
+      if (meta.background) throw error;
 
-
-      const fallback =
-        fallbackQuestion(
-          plan
-        );
-
-
-      diagLog({
-        level: 'info',
-        action: 'generate',
-        event: 'question_ready',
-        kind: FAILURE_KINDS.FALLBACK_USED,
-        message: 'fallback',
-        question_id: fallback?.question_id || fallback?.id || null,
-        module: fallback?.module || null,
-        source: 'fallback',
-        request_id: requestId,
-        session_id: sessionId,
-        question_sequence: sequence,
-        duration_ms: Date.now() - startedAt,
-        outcome: 'ok',
-        fallback: true
-      });
+      const fallback = fallbackQuestion(plan);
+      fallback.deliveryRequestId = requestId;
+      fallback.deliveryFailure = { code: error?.code || null, message: error?.message || '',
+        httpStatus: error?.httpStatus ?? null, reportServiceError: error?.reportServiceError,
+        name: error?.name, kind };
 
 
       return fallback;
@@ -5620,8 +5593,9 @@
 
 
     if (
-      existing?.signature ===
-      signature
+      existing && existing.question_sequence === sequence &&
+      Date.now() - existing.startedAt < 60000 &&
+      plansCompatible(existing.plan, plan)
     ) {
       return;
     }
@@ -5683,6 +5657,7 @@
       generateOneQuestion(
         plan,
         {
+          background: true,
           request_id:
             entry.request_id,
 
@@ -5712,6 +5687,7 @@
               error
             );
 
+            if (sessionPrefetch.get(entry.session_id)?.request_id === entry.request_id) sessionPrefetch.delete(entry.session_id);
             return null;
           }
         );
@@ -5831,8 +5807,9 @@
 
 
     if (
-      existing?.signature ===
-      signature
+      existing && existing.question_sequence === sequence &&
+      Date.now() - existing.startedAt < 60000 &&
+      plansCompatible(existing.plan, plan)
     ) {
       return;
     }
@@ -5895,6 +5872,7 @@
       generateOneQuestion(
         plan,
         {
+          background: true,
           request_id:
             entry.request_id,
 
@@ -5929,6 +5907,7 @@
               error
             );
 
+            if (sessionPrefetch.get(entry.session_id)?.request_id === entry.request_id) sessionPrefetch.delete(entry.session_id);
             return null;
           }
         );
@@ -6029,7 +6008,7 @@
       );
 
 
-    if (!cached) {
+    if (!cached || Date.now() - cached.startedAt > 60000) {
       return null;
     }
 
@@ -6132,7 +6111,7 @@
 
 
     if (
-      !value?.question
+      !value?.question || value.question.source === 'fallback' || Date.now() - cached.startedAt > 60000
     ) {
       return null;
     }
@@ -6175,6 +6154,8 @@
       value.plan.purpose;
 
 
+    value.question.deliveryOrigin = 'prefetch';
+    diagLog({ action: 'generate', event: 'prefetch_consumed', request_id: cached.request_id, session_id: session.id, question_sequence: session.results.length });
     return value.question;
   }
 
@@ -6250,8 +6231,7 @@
 
 
     if (
-      current?.fingerprint ===
-      fingerprint
+      current?.fingerprint === fingerprint && Date.now() - current.startedAt < 60000
     ) {
       return;
     }
@@ -6296,6 +6276,7 @@
         generateOneQuestion(
           plan,
           {
+            background: true,
             request_id:
               requestId,
 
@@ -6321,6 +6302,7 @@
                 error
               );
 
+              if (warmupPrefetch[mode]?.request_id === requestId) warmupPrefetch[mode] = null;
               return null;
             }
           )
@@ -6344,7 +6326,7 @@
       null;
 
 
-    if (!cached) {
+    if (!cached || Date.now() - cached.startedAt > 60000) {
       return null;
     }
 
@@ -6364,7 +6346,7 @@
 
 
     if (
-      !value?.question
+      !value?.question || value.question.source === 'fallback' || Date.now() - cached.startedAt > 60000
     ) {
       return null;
     }
@@ -6412,6 +6394,8 @@
       value.plan.purpose;
 
 
+    value.question.deliveryOrigin = 'warmup';
+    diagLog({ action: 'generate', event: 'prefetch_consumed', request_id: cached.request_id, session_id: session.id, question_sequence: session.results.length });
     return value.question;
   }
 
@@ -8551,8 +8535,19 @@
   }
 
 
-  async function ensureCurrentQuestion(
-    session
+  async function ensureCurrentQuestion(session) {
+    if (session.completed || session.currentQuestion) return;
+    const sequence = session.results.length;
+    if (session._delivery?.sequence === sequence) return session._delivery.promise;
+    const owner = { sequence, startedAt: session.results.length === 0 ? (session._deliveryStartedAt || Date.now()) : Date.now(), request_id: nextRequestId('slot'), promise: null };
+    Object.defineProperty(session, '_delivery', { value: owner, writable: true, configurable: true, enumerable: false });
+    owner.promise = ensureCurrentQuestionOwned(session, owner);
+    try { return await owner.promise; }
+    finally { if (session._delivery === owner) delete session._delivery; }
+  }
+
+  async function ensureCurrentQuestionOwned(
+    session, owner
   ) {
     if (
       session.completed ||
@@ -8652,6 +8647,7 @@
         });
 
 
+        delete session._delivery;
         return ensureCurrentQuestion(
           session
         );
@@ -8751,23 +8747,19 @@
       );
 
 
-    if (prefetched) {
-      session.currentQuestion =
-        prefetched;
-
-    } else {
-      session.currentQuestion =
-        await generateOneQuestion(
-          plan
-        );
-
-
-      session
-        .currentQuestion
-        .zone =
-          plan.zone ||
-          plan.purpose;
-    }
+    if (state.activeSession !== session || session.completed || session.results.length !== owner.sequence ||
+        session._delivery !== owner || session.currentQuestion) return;
+    const question = prefetched || await generateOneQuestion(plan, {
+      request_id: owner.request_id, session_id: session.id, question_sequence: owner.sequence
+    });
+    // A committed fallback is a terminal slot value. Late AI or other fallbacks cannot replace it.
+    if (state.activeSession !== session || session.completed || session.results.length !== owner.sequence ||
+        session._delivery !== owner || session.currentQuestion) return;
+    session.currentQuestion = question;
+    question.deliveryOrigin = prefetched ? 'prefetch' : 'foreground';
+    question.deliveryWaitMs = Date.now() - owner.startedAt;
+    question.deliveryRequestId = question.deliveryRequestId || owner.request_id;
+    question.zone = plan.zone || plan.purpose;
 
 
     saveState();
@@ -8916,6 +8908,8 @@
         .currentQuestion;
 
 
+
+
     if (!q) {
       ensureCurrentQuestion(
         session
@@ -8928,6 +8922,30 @@
     if (!trustedQuestion(q) || q.status === 'void') {
       voidQuestion(session,q,containerId);
       return;
+    }
+
+    if (q && !q._deliveryDisplayed) {
+      q._deliveryDisplayed = true;
+      const fallback = q.source === 'fallback';
+      diagLog({ action: 'generate', event: 'question_displayed',
+        session_id: session.id, question_sequence: session.results.length,
+        question_id: q.question_id || q.id, source: q.source,
+        request_id: q.deliveryRequestId || null, module: q.module,
+        origin: q.deliveryOrigin || 'warmup', bank_id: q.bankId || null,
+        duration_ms: q.deliveryWaitMs ?? null, code: q.deliveryFailure?.code || null,
+        kind: fallback ? FAILURE_KINDS.FALLBACK_USED : null,
+        outcome: 'displayed', fallback });
+      if (fallback && q.deliveryFailure) {
+        markApiRequestFailure(q.deliveryFailure);
+        const quality = /^(GENERATION_|UNVERIFIED_|CANONICAL_|ANSWER_|SOLUTION_)/.test(q.deliveryFailure.code || '');
+        toast(quality ? '本次 AI 题未通过严格数学审核，已切换备用题。'
+          : `AI 本次服务请求异常，已切换备用题：${shortApiError(q.deliveryFailure)}`);
+      }
+      if (q.bankId) {
+        const seen = state.recentDisplayedFallbackIds || [];
+        state.recentDisplayedFallbackIds = [...seen, q.bankId].slice(-40);
+      }
+      saveState();
     }
 
     const zone =
@@ -11134,6 +11152,10 @@
       createDiagnosisSession();
 
 
+    const startedSession = state.activeSession;
+    const deliveryStartedAt = Date.now();
+    Object.defineProperty(startedSession, '_deliveryStartedAt', { value: deliveryStartedAt, writable: true, configurable: true, enumerable: false });
+
     saveState();
 
 
@@ -11164,7 +11186,9 @@
       );
 
 
+    if (state.activeSession !== startedSession || startedSession.completed || startedSession.currentQuestion) return;
     if (warmed) {
+      warmed.deliveryWaitMs = Date.now() - deliveryStartedAt;
       state
         .activeSession
         .currentQuestion =
@@ -11190,6 +11214,10 @@
     state.activeSession =
       createDailySession();
 
+
+    const startedSession = state.activeSession;
+    const deliveryStartedAt = Date.now();
+    Object.defineProperty(startedSession, '_deliveryStartedAt', { value: deliveryStartedAt, writable: true, configurable: true, enumerable: false });
 
     saveState();
 
@@ -11228,7 +11256,9 @@
       );
 
 
+    if (state.activeSession !== startedSession || startedSession.completed || startedSession.currentQuestion) return;
     if (warmed) {
+      warmed.deliveryWaitMs = Date.now() - deliveryStartedAt;
       state
         .activeSession
         .currentQuestion =

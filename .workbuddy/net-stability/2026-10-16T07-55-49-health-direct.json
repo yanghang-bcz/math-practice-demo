@@ -1,0 +1,52 @@
+{
+  "url": "https://calcdaily-d5g2titwue91551fb-1482769901.ap-shanghai.app.tcloudbase.com/api/deepseek",
+  "mode": "health",
+  "via": "direct",
+  "concurrency": 1,
+  "timeout_s": 30,
+  "at": "2026-10-16T07:55:51.870Z",
+  "rows": [
+    {
+      "seq": 1,
+      "ok": true,
+      "outcome": "ok",
+      "reason": null,
+      "http": 200,
+      "net_ms": 1583,
+      "wall_ms": 1611,
+      "ttfb_ms": 1571,
+      "upstream_ms": "1184",
+      "ip": "124.223.148.238",
+      "gate_policy": "strict-tier-b",
+      "math_engine_version": "quality-v2"
+    },
+    {
+      "seq": 2,
+      "ok": true,
+      "outcome": "ok",
+      "reason": null,
+      "http": 200,
+      "net_ms": 327,
+      "wall_ms": 343,
+      "ttfb_ms": 314,
+      "upstream_ms": "34",
+      "ip": "124.223.146.214",
+      "gate_policy": "strict-tier-b",
+      "math_engine_version": "quality-v2"
+    },
+    {
+      "seq": 3,
+      "ok": true,
+      "outcome": "ok",
+      "reason": null,
+      "http": 200,
+      "net_ms": 123,
+      "wall_ms": 143,
+      "ttfb_ms": 115,
+      "upstream_ms": "51",
+      "ip": "124.223.148.238",
+      "gate_policy": "strict-tier-b",
+      "math_engine_version": "quality-v2"
+    }
+  ]
+}
